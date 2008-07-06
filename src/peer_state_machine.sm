@@ -1,0 +1,58 @@
+%{
+
+/* */
+
+%}
+
+%header peer.h
+%class peer_fsm
+%start peer_fsm::initial
+%map peer_fsm
+%%
+
+Initial
+{
+	init(is_server: int) [is_server] WaitForHandshake {}
+
+	init(is_server: int) [0 == transmit_handshake()] WaitForHandshake {}
+
+	init(is_server: int) Error {}
+}
+
+WaitForHandshake
+{
+	receive_message(msg : const rl_proto_message_t *)
+		[is_valid_handshake(msg)]
+		Connected
+		{}
+
+	transmit_message(msg : const rl_proto_message_t *)
+		[]
+		Error
+		{}
+
+	timeout
+		Error
+		{}
+}
+
+Connected
+{
+	receive_message(msg : const rl_proto_message_t *)
+	Connected
+	{}
+
+	transmit_message(msg : const rl_proto_message_t *)
+	Connected
+	{}
+}
+
+Error
+{
+}
+
+Disconnected
+{
+}
+
+%%
