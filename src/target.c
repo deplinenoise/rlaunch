@@ -25,6 +25,7 @@ typedef struct rl_amigafs_tag { char dummy; } rl_amigafs_t;
 #if defined(__AMIGA__)
 #include <proto/exec.h>
 #include <proto/dos.h>
+#include <dos/dostags.h>
 
 #include "amigafs.h"
 
@@ -74,7 +75,29 @@ static int on_launch_executable_request(peer_t *peer, const rl_msg_t *msg)
 {
 	rl_msg_t answer;
 
-	RL_LOG_INFO(("launch executable: '%s'", msg->launch_executable_request.path));
+#if defined(__AMIGA__)
+	char exe_path[128];
+	struct TagItem system_tags[] = {
+		{ SYS_Input, (Tag) NULL },
+		{ SYS_Output, (Tag) NULL },
+		{ SYS_Asynch, TRUE },
+		{ SYS_UserShell, TRUE },
+		{ TAG_DONE, 0 }
+	};
+#endif
+
+
+#if defined(__AMIGA__)
+	rl_format_msg(exe_path, sizeof(exe_path), "TBL0:%s", msg->launch_executable_request.path);
+
+	RL_LOG_INFO(("launch executable: '%s'", exe_path));
+
+	if (0 != SystemTagList(exe_path, &system_tags[0]))
+	{
+		RL_LOG_WARNING(("launch '%s' executable failed", exe_path));
+	}
+#endif
+
 	RL_MSG_INIT(answer, RL_MSG_LAUNCH_EXECUTABLE_ANSWER);
 	answer.launch_executable_answer.hdr_in_reply_to = msg->launch_executable_request.hdr_sequence_num;
 	return peer_transmit_message(peer, &answer);

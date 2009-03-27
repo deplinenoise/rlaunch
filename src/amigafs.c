@@ -324,7 +324,7 @@ static void action_rename_disk		(rl_amigafs_t *fs, struct DosPacket *packet);
 static void action_rename_object	(rl_amigafs_t *fs, struct DosPacket *packet);
 static void action_set_protect		(rl_amigafs_t *fs, struct DosPacket *packet);
 static void action_create_dir		(rl_amigafs_t *fs, struct DosPacket *packet);
-/* static void action_flush			(rl_amigafs_t *fs, struct DosPacket *packet); */
+static void action_flush			(rl_amigafs_t *fs, struct DosPacket *packet); 
 static void action_set_comment		(rl_amigafs_t *fs, struct DosPacket *packet);
 static void action_set_file_date	(rl_amigafs_t *fs, struct DosPacket *packet);
 
@@ -359,7 +359,7 @@ static const lookup_entry_t packet_handlers_range_1[(HANDLER_RANGE_1_LAST - HAND
    { action_examine_next,	BP1| BP2| 0  | 0   }, /* 24 - ACTION_EXAMINE_NEXT  */
    { action_disk_info,		BP1| 0	| 0  | 0   }, /* 25 - ACTION_DISK_INFO	   */
    { action_info,			BP1| BP2| 0  | 0   }, /* 26 - ACTION_INFO		   */
-   { NULL,					0  | 0	| 0  | 0   }, /* 27 - ACTION_FLUSH		   */
+   { action_flush,			0  | 0	| 0  | 0   }, /* 27 - ACTION_FLUSH		   */
    { action_set_comment,	0  | BP2| BP3| BP4 }, /* 28 - ACTION_SET_COMMENT   */
    { action_parent,			BP1| 0	| 0  | 0   }, /* 29 - ACTION_PARENT		   */
    { NULL,					BP1| 0	| 0  | 0   }, /* 30 - ACTION_TIMER		   */
@@ -401,6 +401,7 @@ static void action_findinput(rl_amigafs_t *fs, struct DosPacket *packet)
 	rl_client_handle_t * const dir_handle = HANDLE_FROM_LOCK(dir_lock);
 
 	const void *filename_bstr = BCPL_CAST(const void, packet->dp_Arg3);
+	const char *filename_cstr = BSTR_PTR(filename_bstr);
 
 	rl_pending_operation_t *pending_op = NULL;
 	LONG error_code = 0;
@@ -417,9 +418,19 @@ static void action_findinput(rl_amigafs_t *fs, struct DosPacket *packet)
 		goto error;
 	}
 
+	/* Skip leading DEVICE: header that is sometimes present */
+	{
+		const char* colon;
+		if (NULL != (colon = rl_strchr(filename_cstr, ':')))
+		{
+			filename_cstr = colon+1;
+			RL_LOG_DEBUG(("FINDINPUT: dropping device prefix"));
+		}
+	}
+
 	RL_MSG_INIT(msg, RL_MSG_OPEN_HANDLE_REQUEST);
 	msg.open_handle_request.hdr_sequence_num	= pending_op->request_seqno;
-	msg.open_handle_request.path				= BSTR_PTR(filename_bstr); /* FIXME: Are they always null-terminated? */
+	msg.open_handle_request.path				= filename_cstr; /* FIXME: Are they always null-terminated? */
 	msg.open_handle_request.mode				= RL_OPENFLAG_READ;
 	if (0 != peer_transmit_message(fs->peer, &msg))
 		goto error;
@@ -527,7 +538,10 @@ static void action_examine_object(rl_amigafs_t *fs, struct DosPacket *packet)
 		fib->fib_DiskKey = 0L;
 		fib->fib_DirEntryType = RL_HANDLE_FILE == handle->type ? -1 : 1;
 		construct_bstr(fib->fib_FileName, sizeof(fib->fib_FileName), handle->node_name);
-		fib->fib_Protection = 0xf;
+		/* Set protection bits for regular files. These set bits in the
+		 * protection mask indicate forbidden actions, not caps. Really weird.
+		 * */
+		fib->fib_Protection = FIBF_WRITE | FIBF_DELETE /* simulate R/O FS */;
 		fib->fib_Size = handle->size_lo;
 		fib->fib_NumBlocks = handle->size_lo;
 		fib->fib_Comment[0] = '\0';
@@ -608,7 +622,10 @@ static void complete_examine_next(rl_amigafs_t *fs, rl_pending_operation_t *op, 
 		fib->fib_DirEntryType = RL_NODE_TYPE_DIRECTORY == answer->type ? -1 : 1;
 		fib->fib_EntryType = fib->fib_EntryType; /* FIXME: Is this right? */
 		construct_bstr(fib->fib_FileName, sizeof(fib->fib_FileName), answer->name);
-		fib->fib_Protection = 0xf;
+		/* Set protection bits for regular files. These set bits in the
+		 * protection mask indicate forbidden actions, not caps. Really weird.
+		 * */
+		fib->fib_Protection = FIBF_WRITE | FIBF_DELETE /* simulate R/O FS */;
 		fib->fib_Size = answer->size;
 		fib->fib_NumBlocks = answer->size;
 		fib->fib_Comment[0] = '\0';
@@ -683,6 +700,14 @@ static void action_info(rl_amigafs_t *fs, struct DosPacket *packet)
 		packet->dp_Res2 = ERROR_OBJECT_NOT_FOUND;
 	}
 
+	reply_to_packet(fs, packet);
+}
+
+static void action_flush(rl_amigafs_t *fs, struct DosPacket *packet)
+{
+	/* sure thing */
+	packet->dp_Res1 = DOSTRUE;
+	packet->dp_Res2 = 0;
 	reply_to_packet(fs, packet);
 }
 

@@ -15,6 +15,8 @@
 #include <dirent.h>
 #endif
 
+static char base_path[128];
+
 static int reply_with_error(peer_t *peer, const rl_msg_t *msg, rl_uint32 error_code)
 {
 	rl_msg_t reply;
@@ -67,19 +69,23 @@ static rl_filehandle_t *get_handle_from_id(rl_controller_t *self, peer_t *peer, 
 #define NATIVE_PATH_TERMINATOR '/'
 #endif
 
-static int fix_path(char *dest, size_t dest_size, const char *input)
+static int fix_path(char *dest, size_t dest_size, const char *input, const char *root_path)
 {
 	/* FIXME: Make something proper of this. */
 #ifdef WIN32
-	size_t index = 0;
-	for (; index < dest_size-1; ++index)
+	char backslash_path[128];
+	size_t i;
+
+	for (i = 0; i < sizeof(backslash_path)-1; ++i)
 	{
-		char ch = input[index];
+		char ch = input[i];
 		if ('/' == ch)
 			ch = '\\';
-		dest[index] = ch;
+		backslash_path[i] = ch;
 	}
-	dest[index] = '\0';
+	backslash_path[i] = '\0';
+
+	rl_format_msg(dest, dest_size, "%s\\%s", root_path, backslash_path);
 	return 0;
 #else
 	rl_string_copy(dest_size, dest, input);
@@ -94,11 +100,13 @@ static rl_filehandle_t *make_handle(rl_controller_t *self, const char *path, int
 	char native_path[260];
 
 	/* Fix the path */
-	if (0 != fix_path(native_path, sizeof(native_path), path))
+	if (0 != fix_path(native_path, sizeof(native_path), path, self->root_handle.native_path))
 	{
 		*error_out = RL_NETERR_INVALID_VALUE;
 		return NULL;
 	}
+
+	RL_LOG_DEBUG(("make_handle(\"%s\") => \"%s\"", path, native_path));
 
 	/* Find a free slot.
 	 *
@@ -130,7 +138,7 @@ static rl_filehandle_t *make_handle(rl_controller_t *self, const char *path, int
 		/* When reading, find out what type of path we're looking at (dir/file). */
 		if ((mode & RL_OPENFLAG_WRITE) == 0)
 		{
-			dwAttributes = GetFileAttributes(path);
+			dwAttributes = GetFileAttributes(native_path);
 			if (INVALID_FILE_ATTRIBUTES == dwAttributes)
 			{
 				*error_out = RL_NETERR_NOT_FOUND;
@@ -166,7 +174,7 @@ static rl_filehandle_t *make_handle(rl_controller_t *self, const char *path, int
 				dwCreationDisposition = OPEN_EXISTING;
 
 			slot->handle = CreateFileA(
-					path, dwDesiredAccess, dwShareMode, NULL,
+					native_path, dwDesiredAccess, dwShareMode, NULL,
 					dwCreationDisposition, dwFlagsAndAttributes, NULL);
 
 			slot->find_handle = NULL;
@@ -226,7 +234,7 @@ static rl_filehandle_t *make_handle(rl_controller_t *self, const char *path, int
 		if (mode & RL_OPENFLAG_CREATE)
 			flags |= O_CREAT;
 
-		slot->handle = open(path, flags, 0666);
+		slot->handle = open(native_path, flags, 0666);
 
 		if (-1 == slot->handle)
 		{
@@ -483,6 +491,8 @@ static int read_file_request(peer_t *peer, const rl_msg_t *msg)
 			return reply_with_error(peer, msg, RL_NETERR_IO_ERROR);
 		}
 
+		RL_LOG_DEBUG(("read %d bytes at offset %d from %s -> %d bytes read", size_to_read, pos.LowPart, handle->native_path, bytes_read));
+
 		RL_MSG_INIT(answer, RL_MSG_READ_FILE_ANSWER);
 		answer.read_file_answer.hdr_in_reply_to = request->hdr_sequence_num;
 		answer.read_file_answer.data.base = read_buffer;
@@ -549,3 +559,4 @@ int rl_file_serve(peer_t *peer, const rl_msg_t *msg)
 
 	return 0;
 }
+
