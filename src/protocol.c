@@ -31,7 +31,7 @@ int rl_encode_string(unsigned char **cursor, int *size, const char *string)
 	if (*size < 2)
 		return -1;
 
-	if (string_len + 2 > *size)
+	if ((int) (string_len + 2) > *size)
 		return -1;
 
 	if (string_len > 255)

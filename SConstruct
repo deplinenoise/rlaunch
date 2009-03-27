@@ -39,7 +39,7 @@ if ARGUMENTS.get('amiga', 0):
 	env['VBCCTARGET'] = 'm68k-amigaos'
 	env['VBCCSTARTUP'] = 'minstart.o'
 
-	env['LINK'] = 'vlink'
+	env['LINK'] = os.path.join(os.environ['VBCC'], 'bin/vlink')
 	# Adding -b amigahunk doesn't seem required; it's the default format of vlink.
 	env['LINKFLAGS'] = SCons.Util.CLVar('-Bstatic -nostdlib $VBCC/targets/$VBCCTARGET/lib/$VBCCSTARTUP')
 	env['_LIBDIRFLAGS'] = ''
