@@ -232,7 +232,7 @@ static struct FileLock *allocate_lock(
 
 	handle->handle_id = handle_id;
 	handle->type = type;
-	rl_string_copy(sizeof(handle->node_name), handle->node_name, name);
+	rl_string_copy(sizeof(handle->path), handle->path, name);
 
 	RL_LOG_DEBUG(("Allocated lock %p for handle id %d (%p) type %s", lock, handle_id, handle, rl_client_handle_type_name(type)));
 
@@ -537,7 +537,7 @@ static void action_examine_object(rl_amigafs_t *fs, struct DosPacket *packet)
 		rl_memset(fib, 0, sizeof(*fib));
 		fib->fib_DiskKey = 0L;
 		fib->fib_DirEntryType = RL_HANDLE_FILE == handle->type ? -1 : 1;
-		construct_bstr(fib->fib_FileName, sizeof(fib->fib_FileName), handle->node_name);
+		construct_bstr(fib->fib_FileName, sizeof(fib->fib_FileName), handle->path);
 		/* Set protection bits for regular files. These set bits in the
 		 * protection mask indicate forbidden actions, not caps. Really weird.
 		 * */
@@ -937,7 +937,7 @@ static void action_copy_dir(rl_amigafs_t *fs, struct DosPacket *packet)
 		if (RL_HANDLE_DEVICE == handle->type)
 			copy = allocate_root_lock(fs, SHARED_LOCK);
 		else
-			copy = allocate_lock(fs, handle->type, handle->handle_id, SHARED_LOCK, handle->node_name, handle->size_lo);
+			copy = allocate_lock(fs, handle->type, handle->handle_id, SHARED_LOCK, handle->path, handle->size_lo);
 
 		packet->dp_Res1 = MKBADDR(copy);
 
@@ -971,31 +971,50 @@ static void action_copy_dir(rl_amigafs_t *fs, struct DosPacket *packet)
 static void action_parent(rl_amigafs_t *fs, struct DosPacket *packet)
 {
 	struct FileLock *lock = BCPL_CAST(struct FileLock, packet->dp_Arg1);
+	struct FileLock *result_lock;
 	rl_client_handle_t *handle = HANDLE_FROM_LOCK(lock);
 
 	RL_LOG_DEBUG(("ACTION_PARENT for lock %p (%d)", lock, HANDLE_FROM_LOCK(lock)->handle_id));
 
-	if (handle == &fs->root_handle)
+	if (handle == &fs->root_handle || NULL == handle)
 	{
-		RL_LOG_DEBUG(("[NULL parent for the root]"));
-		packet->dp_Res1 = 0;
-		packet->dp_Res2 = 0;
-		reply_to_packet(fs, packet);
-	}
-	else if (NULL == handle)
-	{
-		RL_LOG_WARNING(("[error; NULL node]"));
+		RL_LOG_DEBUG(("[The root handle (or null handle) doesn't have a parent]"));
 		packet->dp_Res1 = DOSFALSE;
 		packet->dp_Res2 = ERROR_OBJECT_NOT_FOUND;
-		reply_to_packet(fs, packet);
 	}
 	else
 	{
-		/* TODO: FIXME */
-		struct FileLock *result = NULL /* allocate_lock(fs, handle->parent, lock->fl_Access) */;
-		if (result)
+		/* Take the parent handle's path and drop the last path component. */
+		int len;
+		char parent_path[108];
+		struct FileLock* result;
+
+		rl_string_copy(sizeof(parent_path), parent_path, handle->path);
+		len = (int) rl_strlen(parent_path);
+		while (--len >= 0)
 		{
-			packet->dp_Res1 = MKBADDR(result);
+			if (parent_path[len] == '/')
+			{
+				parent_path[len] = '\0';
+				break;
+			}
+		}
+
+		/* No slashes? Assume it's a file in the root directory and return the root. */
+		if (len <= 0)
+		{
+			RL_LOG_DEBUG(("Returning root lock as parent of %s", handle->path));
+			result_lock = allocate_root_lock(fs, SHARED_LOCK);
+		}
+		else
+		{
+			RL_LOG_DEBUG(("parent handle from '%s' to '%s'", handle->path, parent_path));
+			result_lock = allocate_lock(fs, RL_HANDLE_DIR, ~0u, SHARED_LOCK, parent_path, 0);
+		}
+
+		if (result_lock)
+		{
+			packet->dp_Res1 = MKBADDR(result_lock);
 			packet->dp_Res2 = 0;
 		}
 		else
@@ -1004,6 +1023,8 @@ static void action_parent(rl_amigafs_t *fs, struct DosPacket *packet)
 			packet->dp_Res2 = ERROR_OBJECT_NOT_FOUND;
 		}
 	}
+
+	reply_to_packet(fs, packet);
 }
 
 /*
@@ -1027,7 +1048,7 @@ static void action_read(rl_amigafs_t *self, struct DosPacket *packet)
 	rl_pending_operation_t *pending_op;
 	rl_msg_t msg;
 
-	RL_LOG_DEBUG(("action_read \"%s\", %d bytes", handle->node_name, (int) packet->dp_Arg3));
+	RL_LOG_DEBUG(("action_read \"%s\", %d bytes", handle->path, (int) packet->dp_Arg3));
 
 	pending_op = alloc_pending(self, packet, RL_MSG_READ_FILE_ANSWER, complete_read);
 	if (!pending_op)
@@ -1085,6 +1106,7 @@ complete_read(rl_amigafs_t *self, rl_pending_operation_t *op, const rl_msg_t *ms
 		 * the start of the caller-supplied buffer. */
 		packet->dp_Res1 = (LONG) op->detail.read.destination - packet->dp_Arg2;
 		packet->dp_Res2 = 0;
+		RL_LOG_DEBUG(("Returning DOS result %d", packet->dp_Res1));
 		reply_to_packet(self, packet);
 		unlink_pending(self, op);
 	}
@@ -1114,6 +1136,49 @@ complete_read(rl_amigafs_t *self, rl_pending_operation_t *op, const rl_msg_t *ms
 	}
 }
 
+/*
+ *	ACTION_SEEK	Seek(...)
+ *
+ *	ARG1:	ARG1 -	fh_Arg1 field of opened FileHandle
+ *	ARG2:	LONG -	Position or offset
+ *	ARG3:	LONG -	Seek mode
+ *
+ *	RES1:	LONG -	Position before Seek() took place
+ *	RES2:	CODE -	Failure code if RES1 = -1
+ */
+static void action_seek(rl_amigafs_t *self, struct DosPacket *packet)
+{
+	struct FileLock *lock = (struct FileLock *) packet->dp_Arg1;
+	rl_client_handle_t *handle = HANDLE_FROM_LOCK(lock);
+	LONG old_pos;
+	LONG seek_amount;
+
+	RL_LOG_DEBUG(("action_seek \"%s\", %d bytes rel %d", handle->path, (int) packet->dp_Arg2, (int) packet->dp_Arg3));
+
+	old_pos = (LONG) handle->offset_lo;
+	seek_amount = packet->dp_Arg2;
+
+	switch (packet->dp_Arg3)
+	{
+	case OFFSET_BEGINNING:
+		handle->offset_lo = seek_amount;
+		break;
+	case OFFSET_CURRENT:
+		handle->offset_lo = ((LONG) handle->size_lo) + seek_amount;
+		break;
+	case OFFSET_END:
+		handle->offset_lo = ((LONG) handle->size_lo) + seek_amount;
+		break;
+	}
+
+	/* assume 32-bit files */
+	if (handle->offset_lo > handle->size_lo)
+		handle->offset_lo = handle->size_lo;
+
+	packet->dp_Res1 = old_pos;
+	packet->dp_Res2 = 0;
+	reply_to_packet(self, packet);
+}
 
 static const char* get_packet_type_name(const struct DosPacket* packet)
 {
@@ -1225,10 +1290,11 @@ static void process_fs_packet(rl_amigafs_t *self, struct DosPacket* packet)
 		case ACTION_FINDOUTPUT:
 			handler = action_findoutput;
 			break;
+			*/
 
 		case ACTION_SEEK:
 			handler = action_seek;
-			*/
+			break;
 
 		case ACTION_END:
 			handler = action_end;
@@ -1259,7 +1325,7 @@ int rl_amigafs_init(rl_amigafs_t *self, peer_t *peer, const char *device_name)
 	self->peer = peer;
 	self->root_handle.type = RL_HANDLE_DEVICE;
 	self->root_handle.handle_id = (rl_uint32) -1;
-	rl_string_copy(sizeof(self->root_handle.node_name), self->root_handle.node_name, device_name);
+	rl_string_copy(sizeof(self->root_handle.path), self->root_handle.path, device_name);
 
 	if (NULL == (self->device_port = CreateMsgPort()))
 	{

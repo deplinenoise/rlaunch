@@ -17,9 +17,8 @@ struct MsgPort;
 struct DosPacket;
 struct DeviceList;
 
-/* Limit the fun to 64 character path segments. This is per individual path
- * component. */
-#define RL_FSCLIENT_MAX_PATH (64)
+/* Limit the paths we keep track of in client handles. */
+#define RL_FSCLIENT_MAX_PATH (108)
 
 typedef enum rl_client_handle_type_tag
 {
@@ -39,7 +38,7 @@ typedef struct rl_client_handle_tag
 	rl_client_handle_type_t type;
 	rl_uint32 offset_lo;
 	rl_uint32 offset_hi;
-	char node_name[32];
+	char path[RL_FSCLIENT_MAX_PATH];
 	rl_uint32 size_lo;
 	rl_uint32 flags;
 	/* FIXME: Add size_hi, perhaps. */
