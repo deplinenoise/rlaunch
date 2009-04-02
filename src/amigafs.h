@@ -8,6 +8,7 @@
 #include "util.h"
 #include "rlnet.h"
 
+struct FileLock;
 struct peer_tag;
 struct rl_pending_operation_tag;
 struct rl_amigafs_tag;
@@ -116,6 +117,8 @@ typedef struct rl_amigafs_tag
 	rl_client_handle_t				root_handle;
 } rl_amigafs_t;
 
+
+
 int rl_amigafs_init(rl_amigafs_t *self, struct peer_tag *peer, const char *device_name);
 
 void rl_amigafs_destroy(rl_amigafs_t *self);
@@ -123,5 +126,9 @@ void rl_amigafs_destroy(rl_amigafs_t *self);
 int rl_amigafs_process_device_message(rl_amigafs_t *self);
 
 int rl_amigafs_process_network_message(rl_amigafs_t *self, const rl_msg_t *msg);
+
+struct FileLock* rl_amigafs_alloc_root_lock(rl_amigafs_t *self, long mode);
+
+void rl_amigafs_free_lock(rl_amigafs_t *self, struct FileLock *lock);
 
 #endif

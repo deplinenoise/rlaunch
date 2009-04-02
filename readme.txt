@@ -65,7 +65,7 @@ and the executable Bar, the following events will take place (in order):
 
 BUGS AND LIMITATIONS:
 
-- WB doesn't yet like the virtual volumes the target creates; don't use them in WB.
+- All paths are limited to 108 characters. They will be silently truncated.
+- Don't try to launch executables too quickly, the async launcher relies on static storage.
 - The target doesn't currently terminate the connection when the started program dies.
-- Directory handling is spotty.
 - The target doesn't support more than one device (TBL0 is always used).

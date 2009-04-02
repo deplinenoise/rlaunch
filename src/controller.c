@@ -124,7 +124,26 @@ cleanup:
 }
 
 static const char * const usage_string =
-"usage: controller [-fsroot <directory>] [-port <port#>] [-log [a0][dniwc..]] <hostname> <path/to/executable>\n";
+"\nrl-controller v0.95 (c) 2009 Andreas Fredriksson, TBL Technologies\n"
+"A networked programming testing and development solution for the Amiga.\n"
+"\n"
+"USAGE:\n"
+" rl-controller [-fsroot <directory>] [-port <port#>] [-log [a0][dniwc..]] <hostname> <path/to/executable>\n"
+"\n"
+"  <hostname>             Hostname to connect to (mandatory)\n"
+"  <path/to/executable>   Path to executable relative to fsroot, with forward slashes. (mandatory)\n"
+"\n"
+"  Optional parameters:\n"
+"  -fsroot                Specifies the file serving directory. The executable\n"
+"                         must live in this directory as well. (default: cwd)\n"
+"  -port                  The TCP port to connect to on the remote target (default: 7001)\n"
+"  -log                   Specifies log levels\n"
+"                         0: disable everything (default)\n"
+"                         a: enable everything\n"
+"                         d: enable debug channel\n"
+"                         i: enable info channel\n"
+"                         w: enable warning channel\n"
+"                         c: enable console channel\n";
 
 static int pump_peer_state_machine(peer_t *peer)
 {

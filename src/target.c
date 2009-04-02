@@ -71,31 +71,75 @@ static rl_socket_t add_peers_to_fd_set(fd_set *read_fds, fd_set *write_fds, peer
 	return max;
 }
 
-static int on_launch_executable_request(peer_t *peer, const rl_msg_t *msg)
-{
-	rl_msg_t answer;
-
 #if defined(__AMIGA__)
-	char exe_path[128];
+struct launch_msg_tag
+{
+	char path[128];
+	struct FileLock *root_lock;
+} launch_msg;
+
+static void cmd_launcher(void)
+{
 	struct TagItem system_tags[] = {
+		{ NP_CurrentDir, (Tag) NULL }, /* filled in below */
 		{ SYS_Input, (Tag) NULL },
 		{ SYS_Output, (Tag) NULL },
 		{ SYS_Asynch, TRUE },
 		{ SYS_UserShell, TRUE },
 		{ TAG_DONE, 0 }
 	};
+
+	system_tags[0].ti_Data = (Tag) MKBADDR(launch_msg.root_lock);
+
+	if (0 != SystemTagList(launch_msg.path, &system_tags[0]))
+		UnLock(MKBADDR(launch_msg.root_lock));
+}
+
+static void async_spawn(peer_t *peer, const char *cmd)
+{
+	rl_amigafs_t * const fs = (rl_amigafs_t *) peer->userdata;
+
+	struct TagItem launch_tags[] =
+	{
+		NP_Entry,				(ULONG)cmd_launcher,
+		NP_StackSize,			8000,
+		NP_Name,				(ULONG)"Process Launcher",
+		NP_Cli,					TRUE,
+		NP_Input,				(Tag) NULL,
+		NP_Output,				(Tag) NULL,
+		NP_CloseInput,			FALSE,
+		NP_CloseOutput,			FALSE,
+		TAG_DONE,				0
+	};
+
+	struct Process *launcher_proc;
+
+	rl_format_msg(launch_msg.path, sizeof(launch_msg.path), "%s", cmd);
+	launch_msg.root_lock = rl_amigafs_alloc_root_lock(fs, SHARED_LOCK);
+
+	if (!(launcher_proc = CreateNewProc(&launch_tags[0])))
+	{
+		rl_amigafs_free_lock(fs, launch_msg.root_lock);
+		RL_LOG_WARNING(("Couldn't kick launcher thread"));
+		return;
+	}
+}
 #endif
 
 
+static int on_launch_executable_request(peer_t *peer, const rl_msg_t *msg)
+{
+	rl_msg_t answer;
+
 #if defined(__AMIGA__)
+	char exe_path[108];
+
+	/* Start the executable in the network device root */
 	rl_format_msg(exe_path, sizeof(exe_path), "TBL0:%s", msg->launch_executable_request.path);
 
 	RL_LOG_INFO(("launch executable: '%s'", exe_path));
+	async_spawn(peer, exe_path);
 
-	if (0 != SystemTagList(exe_path, &system_tags[0]))
-	{
-		RL_LOG_WARNING(("launch '%s' executable failed", exe_path));
-	}
 #endif
 
 	RL_MSG_INIT(answer, RL_MSG_LAUNCH_EXECUTABLE_ANSWER);
@@ -327,6 +371,8 @@ static void common_main(const char *bind_address, int bind_port)
 {
 	rl_socket_t listener_fd;
 	struct sockaddr_in listen_address;
+
+	rl_log_message("rl-controller v0.95 (c) 2009 Andreas Fredriksson, TBL Technologies");
 
 	RL_LOG_DEBUG(("common_main: bind_address:%s, bind_port:%d", bind_address, bind_port));
 

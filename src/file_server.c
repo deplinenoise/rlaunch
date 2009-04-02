@@ -22,7 +22,7 @@ static int reply_with_error(peer_t *peer, const rl_msg_t *msg, rl_uint32 error_c
 	rl_msg_t reply;
 	RL_MSG_INIT(reply, RL_MSG_ERROR_ANSWER);
 	reply.error_answer.hdr_in_reply_to = msg->handshake_request.hdr_sequence_num;
-	reply.error_answer.error_code = RL_NETERR_BAD_REQUEST;
+	reply.error_answer.error_code = error_code;
 	peer_transmit_message(peer, &reply);
 	return 1;
 }

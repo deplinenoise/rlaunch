@@ -18,7 +18,9 @@
 #include <dos/dos.h>
 #include <exec/execbase.h>
 
-#define RL_AMIGA_PATH_MAX 32
+#define RL_AMIGA_PATH_MAX 108
+
+#define HANDLE_FROM_LOCK(lock) ((rl_client_handle_t*) (lock)->fl_Key)
 
 static LONG translate_error_code(rl_uint32 error_code);
 static const char* get_packet_type_name(const struct DosPacket* packet);
@@ -33,6 +35,57 @@ static const char *rl_client_handle_type_name(rl_client_handle_type_t type)
 		case RL_HANDLE_DEVICE: return "device";
 		default:
 							   return "<bogus>";
+	}
+}
+
+/*
+ * Given an input path and an optional parent directory, compute the
+ * corresponding absolute path on the server.
+ */
+static void normalize_object_path(
+	rl_amigafs_t *fs,
+	char *buffer,
+	size_t buffer_size,
+	struct FileLock *dir_lock,
+	const void *object_name_bstr)
+{
+	char item_path[RL_AMIGA_PATH_MAX];
+	char full_path[RL_AMIGA_PATH_MAX];
+	rl_client_handle_t *handle;
+
+	/*
+	 * Establish a node to start "locating" from--if we don't have a lock,
+	 * start from the root
+	 */
+	if (!dir_lock)
+		handle = &fs->root_handle;
+	else
+		handle = HANDLE_FROM_LOCK(dir_lock);
+
+	rl_memcpy(item_path, BSTR_PTR(object_name_bstr), BSTR_LEN(object_name_bstr));
+	item_path[BSTR_LEN(object_name_bstr)] = '\0';
+
+	/*
+	 * If the name is absolute (starts with a device name followed by a
+	 * colon, or a lone colon) we override the start location to be the root.
+	 */
+	{
+		const char *colon_pos = rl_strchr(item_path, ':');
+		if (colon_pos)
+		{
+			rl_memmove(item_path, colon_pos+1, rl_strlen(colon_pos+1)+1);
+			handle = &fs->root_handle;
+		}
+	}
+
+	if (&fs->root_handle != handle)
+	{
+		RL_LOG_DEBUG(("normalize: path '%s' relative to parent '%s'", item_path, handle->path));
+		rl_format_msg(buffer, buffer_size, "%s/%s", handle->path, item_path);
+	}
+	else
+	{
+		rl_format_msg(buffer, buffer_size, "%s", item_path);
 	}
 }
 
@@ -123,8 +176,6 @@ static void unlink_pending(rl_amigafs_t *self, rl_pending_operation_t *target)
 }
 
 
-#define HANDLE_FROM_LOCK(lock) ((rl_client_handle_t*) (lock)->fl_Key)
-
 /*
  * Mount a volume with the specified device name and map all handler messages
  * to the specified port.
@@ -191,7 +242,7 @@ reply_to_packet(rl_amigafs_t *self, struct DosPacket *packet)
 	return 0;
 }
 
-static struct FileLock *allocate_root_lock(rl_amigafs_t *fs, LONG mode)
+struct FileLock* rl_amigafs_alloc_root_lock(rl_amigafs_t *self, long mode)
 {
 	struct FileLock *lock = NULL;
 
@@ -201,9 +252,9 @@ static struct FileLock *allocate_root_lock(rl_amigafs_t *fs, LONG mode)
 	RL_LOG_DEBUG(("Allocated lock %p for root", lock));
 
 	lock->fl_Access = mode;
-	lock->fl_Key = (LONG) &fs->root_handle;
-	lock->fl_Task = fs->device_port;
-	lock->fl_Volume = MKBADDR(fs->device_list);
+	lock->fl_Key = (LONG) &self->root_handle;
+	lock->fl_Task = self->device_port;
+	lock->fl_Volume = MKBADDR(self->device_list);
 	return lock;
 
 error:
@@ -251,7 +302,7 @@ error:
 	return NULL;
 }
 
-static void free_lock(rl_amigafs_t *fs, struct FileLock *lock)
+void rl_amigafs_free_lock(rl_amigafs_t *fs, struct FileLock *lock)
 {
 	rl_client_handle_t *handle;
 	rl_msg_t msg;
@@ -731,7 +782,7 @@ static void action_locate_object(rl_amigafs_t *fs, struct DosPacket* packet)
 	const void* object_name_bstr = BCPL_CAST(const void, packet->dp_Arg2);
 	const LONG mode = packet->dp_Arg3;
 	struct FileLock *result_lock = NULL;
-	char path[RL_AMIGA_PATH_MAX] = { '\0' };
+	char full_path[RL_AMIGA_PATH_MAX];
 	rl_client_handle_t *handle = NULL;
 	rl_pending_operation_t *pending_op;
 	rl_msg_t msg;
@@ -742,48 +793,14 @@ static void action_locate_object(rl_amigafs_t *fs, struct DosPacket* packet)
 				(int) mode,
 				mode == -1 ? "SHARED_LOCK/ACCESS_READ" : "EXCLUSIVE_LOCK/ACCESS_WRITE"));
 
-	if (BSTR_LEN(object_name_bstr) >= sizeof(path))
-	{
-		RL_LOG_DEBUG(("Path too long--returning ERROR_OBJECT_NOT_FOUND"));
-		packet->dp_Res1 = DOSFALSE;
-		packet->dp_Res2 = ERROR_BAD_STREAM_NAME;
-		reply_to_packet(fs, packet);
-		return;
-	}
-
-	rl_memcpy(path, BSTR_PTR(object_name_bstr), BSTR_LEN(object_name_bstr));
-	path[BSTR_LEN(object_name_bstr)] = '\0';
-
-	/*
-	 * Establish a node to start "locating" from--if we don't have a lock,
-	 * start from the root
-	 */
-	if (!dir_lock)
-		handle = &fs->root_handle;
-	else
-		handle = HANDLE_FROM_LOCK(dir_lock);
-
-	/*
-	 * If the name is absolute (starts with a device name followed by a
-	 * colon, or a lone colon) we override the start location to be the root.
-	 */
-	{
-		const char *colon_pos = rl_strchr(path, ':');
-		if (colon_pos)
-		{
-			rl_memmove(path, colon_pos+1, rl_strlen(colon_pos+1)+1);
-			handle = &fs->root_handle;
-		}
-	}
-
-	/* TODO: Clean up and normalize the path string. */
-
-	RL_LOG_DEBUG(("Normalized lookup path: '%s'", path));
+	/* Clean up and normalize the path string. */
+	normalize_object_path(fs, full_path, sizeof(full_path), dir_lock, object_name_bstr);
+	RL_LOG_DEBUG(("Normalized lookup path: '%s'", full_path));
 
 	/* If the client really wanted the root node, we can return that immediately. */
-	if (0 == rl_strlen(path))
+	if (0 == rl_strlen(full_path))
 	{
-		result_lock = allocate_root_lock(fs, mode);
+		result_lock = rl_amigafs_alloc_root_lock(fs, mode);
 		if (!result_lock)
 			goto error;
 		RL_LOG_DEBUG(("Returning lock: %p for handle id %d", result_lock, HANDLE_FROM_LOCK(result_lock)->handle_id));
@@ -803,7 +820,7 @@ static void action_locate_object(rl_amigafs_t *fs, struct DosPacket* packet)
 
 	RL_MSG_INIT(msg, RL_MSG_OPEN_HANDLE_REQUEST);
 	msg.open_handle_request.hdr_sequence_num	= pending_op->request_seqno;
-	msg.open_handle_request.path				= &path[0];
+	msg.open_handle_request.path				= &full_path[0];
 	if (0 != peer_transmit_message(fs->peer, &msg))
 	{
 		error_code = ERROR_NOT_A_DOS_DISK;
@@ -825,13 +842,16 @@ static void complete_locate_object(rl_amigafs_t *fs, rl_pending_operation_t *op,
 {
 	struct FileLock *lock = NULL;
 	struct DosPacket * const packet = op->input_packet;
+	struct FileLock *dir_lock = BCPL_CAST(struct FileLock, packet->dp_Arg1);
 	const void* object_name_bstr = BCPL_CAST(const void, packet->dp_Arg2);
-
+	char full_path[RL_AMIGA_PATH_MAX];
 	const rl_client_handle_type_t type =
 		RL_NODE_TYPE_DIRECTORY == msg->open_handle_answer.type ? RL_HANDLE_DIR : RL_HANDLE_FILE;
 
+	normalize_object_path(fs, full_path, sizeof(full_path), dir_lock, object_name_bstr);
+
 	/* FIXME: The input path here is bogus. */
-	if (NULL != (lock = allocate_lock(fs, type, msg->open_handle_answer.handle, 0, BSTR_PTR(object_name_bstr), msg->open_handle_answer.size)))
+	if (NULL != (lock = allocate_lock(fs, type, msg->open_handle_answer.handle, 0, full_path, msg->open_handle_answer.size)))
 	{
 		op->input_packet->dp_Res1 = MKBADDR(lock);
 		op->input_packet->dp_Res2 = 0;
@@ -859,7 +879,7 @@ static void action_free_lock(rl_amigafs_t *fs, struct DosPacket* packet)
 	if (lock)
 	{
 		RL_LOG_DEBUG(("ACTION_FREE_LOCK: lock: %p (handle: %d) Node=%x", lock, HANDLE_FROM_LOCK(lock)->handle_id, (int)lock->fl_Key));
-		free_lock(fs, lock);
+		rl_amigafs_free_lock(fs, lock);
 		packet->dp_Res1 = DOSTRUE;
 		packet->dp_Res2 = 0;
 	}
@@ -889,7 +909,7 @@ static void action_end(rl_amigafs_t *fs, struct DosPacket *packet)
 	 * half continuation with the close_handle_answer. Otherwise we might run
 	 * out of handles if opening/closing quicker on the client than on the
 	 * server. */
-	free_lock(fs, lock);
+	rl_amigafs_free_lock(fs, lock);
 
 	packet->dp_Res1 = DOSTRUE;
 	packet->dp_Res2 = 0;
@@ -935,7 +955,7 @@ static void action_copy_dir(rl_amigafs_t *fs, struct DosPacket *packet)
 		rl_client_handle_t *handle = HANDLE_FROM_LOCK(lock);
 
 		if (RL_HANDLE_DEVICE == handle->type)
-			copy = allocate_root_lock(fs, SHARED_LOCK);
+			copy = rl_amigafs_alloc_root_lock(fs, SHARED_LOCK);
 		else
 			copy = allocate_lock(fs, handle->type, handle->handle_id, SHARED_LOCK, handle->path, handle->size_lo);
 
@@ -987,7 +1007,6 @@ static void action_parent(rl_amigafs_t *fs, struct DosPacket *packet)
 		/* Take the parent handle's path and drop the last path component. */
 		int len;
 		char parent_path[108];
-		struct FileLock* result;
 
 		rl_string_copy(sizeof(parent_path), parent_path, handle->path);
 		len = (int) rl_strlen(parent_path);
@@ -1004,7 +1023,7 @@ static void action_parent(rl_amigafs_t *fs, struct DosPacket *packet)
 		if (len <= 0)
 		{
 			RL_LOG_DEBUG(("Returning root lock as parent of %s", handle->path));
-			result_lock = allocate_root_lock(fs, SHARED_LOCK);
+			result_lock = rl_amigafs_alloc_root_lock(fs, SHARED_LOCK);
 		}
 		else
 		{
@@ -1462,12 +1481,80 @@ int rl_amigafs_process_network_message(rl_amigafs_t *self, const rl_msg_t *msg)
 }
 
 static void action_die(rl_amigafs_t *self, struct DosPacket* packet) {}
-static void action_current_volume(rl_amigafs_t *self, struct DosPacket* packet) {}
-static void action_delete_object(rl_amigafs_t *self, struct DosPacket* packet) {}
-static void action_inhibit(rl_amigafs_t *self, struct DosPacket* packet) {}
-static void action_rename_disk(rl_amigafs_t *self, struct DosPacket* packet) {}
-static void action_rename_object(rl_amigafs_t *self, struct DosPacket* packet) {}
-static void action_create_dir(rl_amigafs_t *self, struct DosPacket* packet) {}
+
+/*
+   ACTION_CURRENT_VOLUME
+
+Purpose: identify the volume belonging to a FileHandle
+Implements: used by AmigaDOS function ErrorReport(REPORT_STREAM)t
+dp_Type - ACTION_CURRENT_VOLUME (7)
+dp_Arg1 - fh->fh_Argl
+dp_Res1 - BPTR to struct DeviceList
+dp_Res2 - ULONG (Exec unit number)
+*/
+static void action_current_volume(rl_amigafs_t *self, struct DosPacket* packet)
+{
+	RL_LOG_DEBUG(("action_current_volume"));
+	packet->dp_Res1 = MKBADDR(self->device_list);
+	packet->dp_Res2 = 0;
+	reply_to_packet(self, packet);
+	return;
+}
+
+static void action_delete_object(rl_amigafs_t *self, struct DosPacket* packet)
+{
+	RL_LOG_DEBUG(("action_delete_object"));
+	packet->dp_Res1 = DOSFALSE;
+	packet->dp_Res2 = 0;
+	reply_to_packet(self, packet);
+	return;
+}
+
+static void action_inhibit(rl_amigafs_t *self, struct DosPacket* packet)
+{
+	RL_LOG_DEBUG(("action_inhibit"));
+	packet->dp_Res1 = DOSFALSE;
+	packet->dp_Res2 = 0;
+	reply_to_packet(self, packet);
+}
+
+static void action_rename_disk(rl_amigafs_t *self, struct DosPacket* packet)
+{
+	RL_LOG_DEBUG(("action_rename_disk"));
+	packet->dp_Res1 = DOSFALSE;
+	packet->dp_Res2 = 0;
+	reply_to_packet(self, packet);
+}
+
+static void action_rename_object(rl_amigafs_t *self, struct DosPacket* packet)
+{
+	RL_LOG_DEBUG(("action_rename_object"));
+	packet->dp_Res1 = DOSFALSE;
+	packet->dp_Res2 = 0;
+	reply_to_packet(self, packet);
+}
+
+static void action_create_dir(rl_amigafs_t *self, struct DosPacket* packet)
+{
+	RL_LOG_DEBUG(("action_rename_object"));
+	packet->dp_Res1 = DOSFALSE;
+	packet->dp_Res2 = 0;
+	reply_to_packet(self, packet);
+}
+
 /* static void action_flush(rl_amigafs_t *self, struct DosPacket* packet) {} */
-static void action_set_comment(rl_amigafs_t *self, struct DosPacket* packet) {}
-static void action_set_file_date(rl_amigafs_t *self, struct DosPacket* packet) {}
+static void action_set_comment(rl_amigafs_t *self, struct DosPacket* packet)
+{
+	RL_LOG_DEBUG(("action_set_comment"));
+	packet->dp_Res1 = DOSFALSE;
+	packet->dp_Res2 = 0;
+	reply_to_packet(self, packet);
+}
+
+static void action_set_file_date(rl_amigafs_t *self, struct DosPacket* packet)
+{
+	RL_LOG_DEBUG(("action_set_file_date"));
+	packet->dp_Res1 = DOSFALSE;
+	packet->dp_Res2 = 0;
+	reply_to_packet(self, packet);
+}
