@@ -283,6 +283,7 @@ static struct FileLock *allocate_lock(
 
 	handle->handle_id = handle_id;
 	handle->type = type;
+	handle->size_lo = size;
 	rl_string_copy(sizeof(handle->path), handle->path, name);
 
 	RL_LOG_DEBUG(("Allocated lock %p for handle id %d (%p) type %s", lock, handle_id, handle, rl_client_handle_type_name(type)));
@@ -1183,7 +1184,7 @@ static void action_seek(rl_amigafs_t *self, struct DosPacket *packet)
 		handle->offset_lo = seek_amount;
 		break;
 	case OFFSET_CURRENT:
-		handle->offset_lo = ((LONG) handle->size_lo) + seek_amount;
+		handle->offset_lo += seek_amount;
 		break;
 	case OFFSET_END:
 		handle->offset_lo = ((LONG) handle->size_lo) + seek_amount;
