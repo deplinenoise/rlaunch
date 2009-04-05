@@ -372,7 +372,7 @@ static void common_main(const char *bind_address, int bind_port)
 	rl_socket_t listener_fd;
 	struct sockaddr_in listen_address;
 
-	rl_log_message("rl-controller v0.95 (c) 2009 Andreas Fredriksson, TBL Technologies");
+	rl_log_message("rl-controller v0.97 (c) 2009 Andreas Fredriksson, TBL Technologies");
 
 	RL_LOG_DEBUG(("common_main: bind_address:%s, bind_port:%d", bind_address, bind_port));
 

@@ -123,6 +123,13 @@ void rl_toggle_log_bits(const char *argument);
 #define RL_LOG_CONSOLE(expr) RL_LOG(RL_CONSOLE, expr)
 
 /*
+ * Utility macros
+ */
+
+#define RL_MIN_MACRO(a, b) ((a) < (b) ? (a) : (b))
+#define RL_MAX_MACRO(a, b) ((a) > (b) ? (a) : (b))
+
+/*
  * Dynamic memory allocation
  */
 

@@ -33,23 +33,31 @@ enum rl_client_handle_flags_tag
 	RL_CLIENT_FLAG_FILE_ENUM_IN_PROGRESS = 1
 };
 
+/* FIXME: Add size_hi, perhaps. AmigaOS doesn't really support >2GB files anyway though. */
 typedef struct rl_client_handle_tag
 {
 	rl_uint32 handle_id;
 	rl_client_handle_type_t type;
+
+	/* Current read position. */
 	rl_uint32 offset_lo;
 	rl_uint32 offset_hi;
-	char path[RL_FSCLIENT_MAX_PATH];
+
 	rl_uint32 size_lo;
 	rl_uint32 flags;
-	/* FIXME: Add size_hi, perhaps. */
-	struct rl_client_handle_tag *next;
+
+	/* The handle's path, used to compute relative paths for locks. */
+	char path[RL_FSCLIENT_MAX_PATH];
+
+	/* State for read buffering. */
+	rl_uint32 buffer_start;
+	rl_uint32 buffer_len;
+	rl_uint8 buffer[4096];
 } rl_client_handle_t;
 
 typedef struct rl_pending_read_tag
 {
 	char *destination;
-	rl_uint32 bytes_read;
 } rl_pending_read_t;
 
 typedef struct rl_pending_write_tag

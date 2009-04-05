@@ -444,9 +444,6 @@ static void complete_findinput(rl_amigafs_t *fs, rl_pending_operation_t *op, con
 
 static void action_findinput(rl_amigafs_t *fs, struct DosPacket *packet)
 {
-	struct FileHandle * const fh =
-		BCPL_CAST(struct FileHandle, packet->dp_Arg1);
-
 	struct FileLock * const dir_lock =
 		BCPL_CAST(struct FileLock, packet->dp_Arg2);
 
@@ -1057,19 +1054,52 @@ static void action_parent(rl_amigafs_t *fs, struct DosPacket *packet)
  *	RES1:	LONG -	Number of bytes read. 0 indicates EOF. -1 indicates ERROR
  *	RES2:	CODE -	Failure code if RES1 = -1
  */
-static void complete_read(rl_amigafs_t *self, rl_pending_operation_t *op, const rl_msg_t *msg);
+static void
+complete_read(rl_amigafs_t *self, rl_pending_operation_t *op, const rl_msg_t *msg);
 
-static void action_read(rl_amigafs_t *self, struct DosPacket *packet)
+static int
+transmit_read_request(peer_t *peer, rl_client_handle_t *handle, rl_pending_operation_t *op, rl_uint32 count);
+
+static int
+buffer_overlap(rl_client_handle_t *handle, struct DosPacket *packet, rl_uint32* offset, rl_uint32* count);
+
+static void
+action_read(rl_amigafs_t *self, struct DosPacket *packet)
 {
 	LONG error_code = ERROR_SEEK_ERROR; /* TODO: What to use for real read errors? */
 	struct FileLock *lock = (struct FileLock *) packet->dp_Arg1;
 	rl_client_handle_t *handle = HANDLE_FROM_LOCK(lock);
+	rl_uint32 bytes_remaining = (rl_uint32) packet->dp_Arg3;
 
 	rl_pending_operation_t *pending_op;
-	rl_msg_t msg;
 
 	RL_LOG_DEBUG(("action_read \"%s\", %d bytes", handle->path, (int) packet->dp_Arg3));
 
+	/* See if we can satisfy some of the request from the read buffer. */
+	{
+		rl_uint32 offset, count;
+		if (buffer_overlap(handle, packet, &offset, &count))
+		{
+			/* We can return (some) buffered data. */
+			handle->offset_lo += count;
+			bytes_remaining -= count;
+			rl_memcpy((char*) packet->dp_Arg2, &handle->buffer[offset], count);
+
+			/* Early out for request served entirely from buffer. */
+			if (0 == bytes_remaining)
+			{
+				RL_LOG_DEBUG(("early out servicing %u bytes from buffer", count));
+				packet->dp_Res1 = count;
+				packet->dp_Res2 = 0;
+				reply_to_packet(self, packet);
+				return;
+			}
+		}
+	}
+
+	/* We have to round-trip to the server for more buffer data.
+	 * Populate a pending op and queue it waiting for the network reply.
+	 */
 	pending_op = alloc_pending(self, packet, RL_MSG_READ_FILE_ANSWER, complete_read);
 	if (!pending_op)
 	{
@@ -1077,18 +1107,12 @@ static void action_read(rl_amigafs_t *self, struct DosPacket *packet)
 		goto error;
 	}
 
-	pending_op->detail.read.destination = (char*) packet->dp_Arg2;
-	pending_op->detail.read.bytes_read = 0;
+	{
+		rl_uint32 bytes_read = (rl_uint32) packet->dp_Arg3 - bytes_remaining;
+		pending_op->detail.read.destination = (char*) packet->dp_Arg2 + bytes_read;
+	}
 
-	RL_MSG_INIT(msg, RL_MSG_READ_FILE_REQUEST);
-	msg.read_file_request.hdr_sequence_num	= pending_op->request_seqno;
-	msg.read_file_request.handle			= handle->handle_id;
-	msg.read_file_request.offset_hi			= handle->offset_hi;
-	msg.read_file_request.offset_lo			= handle->offset_lo;
-	/* TODO: split into multiple packets on request side or in answer w/ continuations? */
-	msg.read_file_request.length			= packet->dp_Arg3;
-
-	if (0 != peer_transmit_message(self->peer, &msg))
+	if (0 != transmit_read_request(self->peer, handle, pending_op, bytes_remaining))
 		goto error;
 
 	return;
@@ -1102,6 +1126,53 @@ error:
 	reply_to_packet(self, packet);
 }
 
+static int
+transmit_read_request(peer_t *peer, rl_client_handle_t *handle, rl_pending_operation_t *op, rl_uint32 count)
+{
+	rl_msg_t msg;
+	RL_MSG_INIT(msg, RL_MSG_READ_FILE_REQUEST);
+	msg.read_file_request.hdr_sequence_num	= op->request_seqno;
+	msg.read_file_request.handle			= handle->handle_id;
+	msg.read_file_request.offset_hi			= handle->offset_hi;
+	msg.read_file_request.offset_lo			= handle->offset_lo;
+	/* TODO: split into multiple packets on request side or in answer w/ continuations? */
+	msg.read_file_request.length			= RL_MAX_MACRO(count, sizeof(handle->buffer));
+
+	return peer_transmit_message(peer, &msg);
+}
+
+static int
+buffer_overlap(rl_client_handle_t *handle, struct DosPacket *packet, rl_uint32* offset, rl_uint32* count)
+{
+	rl_uint32 lo = handle->buffer_start;
+	rl_uint32 hi = handle->buffer_start + handle->buffer_len;
+	rl_uint32 out_offset;
+	rl_uint32 avail = 0;
+	rl_uint32 bytes_to_read = (rl_uint32) packet->dp_Arg3;
+
+	/* See if the buffer lies after the cursor */
+	if (handle->offset_lo < lo)
+		return 0;
+
+	/* See if the buffer lies before the cursor */
+	if (hi <= handle->offset_lo)
+		return 0;
+
+	/* There is overlap with the start position inside the buffer. */
+	avail = hi - handle->offset_lo;
+	*offset = out_offset = (handle->offset_lo - lo);
+	*count = RL_MIN_MACRO(avail, bytes_to_read);
+	return 1;
+}
+
+static rl_uint32
+readop_bytes_read(rl_pending_operation_t *op, struct DosPacket *packet)
+{
+	/* Calculate how much we read through pointer subtraction: dp_Arg2 is
+	 * the start of the caller-supplied buffer. */
+	return (rl_uint8*) op->detail.read.destination - (rl_uint8*) packet->dp_Arg2;
+}
+
 static void
 complete_read(rl_amigafs_t *self, rl_pending_operation_t *op, const rl_msg_t *msg) 
 {
@@ -1109,44 +1180,55 @@ complete_read(rl_amigafs_t *self, rl_pending_operation_t *op, const rl_msg_t *ms
 	struct FileLock *lock = (struct FileLock *) packet->dp_Arg1;
 	rl_client_handle_t *handle = HANDLE_FROM_LOCK(lock);
 	const rl_uint32 amount_read = msg->read_file_answer.data.length;
+	rl_uint32 amount_left = (rl_uint32) packet->dp_Arg3 - readop_bytes_read(op, packet);
+	rl_uint32 slice_amount;
 
-	/* TODO: Handle 64-bit overflow */
-	handle->offset_lo += amount_read;
+	/* Move data from the packet's transfer buffer into the destination.
+	 *
+	 * The read can have been much greater than requested, so only copy the
+	 * externally expected size. For example, when requesting a single byte a
+	 * full buffer will be requested. One byte should go to the external
+	 * buffer, and the rest should end up in the buffer space to be used for
+	 * future reads. */
+	slice_amount = RL_MIN_MACRO(amount_left, amount_read);
+	rl_memcpy(op->detail.read.destination, msg->read_file_answer.data.base, slice_amount);
 
-	/* subtract from remaining read length */
-	op->detail.read.bytes_read += amount_read;
+	/* Update the handle's virtual file position. TODO: 64-bit filepos. */
+	handle->offset_lo += slice_amount;
 
-	rl_memcpy(op->detail.read.destination, msg->read_file_answer.data.base, amount_read);
-	op->detail.read.destination += amount_read;
+	/* Move the byte cursor within the pending operation. Note that the op
+	 * structure is reused between all reads required to fulfil a non-buffered
+	 * read. */
+	op->detail.read.destination += slice_amount;
 
-	/* if we're done, reply to the ACTION_READ and unlink the message */
-	if (packet->dp_Arg3 == op->detail.read.bytes_read || 0 == amount_read)
+	/* If we're done (all bytes read, or EOF), reply to the ACTION_READ and
+	 * unlink the message. */
+	if (packet->dp_Arg3 == readop_bytes_read(op, packet) || 0 == amount_read)
 	{
-		/* Calculate how much we read through pointer subtraction--dp_Arg2 is
-		 * the start of the caller-supplied buffer. */
-		packet->dp_Res1 = (LONG) op->detail.read.destination - packet->dp_Arg2;
+		/* Any extra data we managed to read goes into the buffer. */
+		handle->buffer_start = handle->offset_lo;
+		handle->buffer_len = amount_read - slice_amount;
+		rl_memcpy(handle->buffer, msg->read_file_answer.data.base + slice_amount, handle->buffer_len);
+		RL_LOG_DEBUG(("Buffered %u bytes from offset %u", handle->buffer_len, handle->buffer_start));
+
+		packet->dp_Res1 = readop_bytes_read(op, packet);
 		packet->dp_Res2 = 0;
 		RL_LOG_DEBUG(("Returning DOS result %d", packet->dp_Res1));
 		reply_to_packet(self, packet);
 		unlink_pending(self, op);
 	}
-	/* otherwise, continue by leaving the read pending and issue another read request */
+	/* Otherwise, continue by leaving the read pending and issue more requests
+	 * until we have filled the externally supplied buffer. AmigaDOS allows
+	 * handlers to return partial reads, but in practice a lot of code is
+	 * written that doesn't properly loop around Read(), so we have to do it
+	 * for them or it will fail.
+	 */
 	else
 	{
-		rl_msg_t msg;
-
-		/* Just grab the next sequence number */
+		/* Just grab the next sequence number and requeue the same operation */
 		op->request_seqno = self->seqno++;
 
-		RL_MSG_INIT(msg, RL_MSG_READ_FILE_REQUEST);
-		msg.read_file_request.hdr_sequence_num	= op->request_seqno;
-		msg.read_file_request.handle			= handle->handle_id;
-		msg.read_file_request.offset_hi			= handle->offset_hi;
-		msg.read_file_request.offset_lo			= handle->offset_lo;
-		/* TODO: split into multiple packets on request side or in answer w/ continuations? */
-		msg.read_file_request.length			= packet->dp_Arg3 - op->detail.read.bytes_read;
-
-		if (0 != peer_transmit_message(self->peer, &msg))
+		if (0 != transmit_read_request(self->peer, handle, op, packet->dp_Arg3 - readop_bytes_read(op, packet)))
 		{
 			packet->dp_Res1 = 0;
 			packet->dp_Res2 = ERROR_SEEK_ERROR;
