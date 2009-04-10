@@ -668,8 +668,8 @@ static void complete_examine_next(rl_amigafs_t *fs, rl_pending_operation_t *op, 
 	{
 		rl_memset(fib, 0, sizeof(*fib));
 		fib->fib_DiskKey = 0L;
-		fib->fib_DirEntryType = RL_NODE_TYPE_DIRECTORY == answer->type ? -1 : 1;
-		fib->fib_EntryType = fib->fib_EntryType; /* FIXME: Is this right? */
+		fib->fib_DirEntryType = RL_NODE_TYPE_DIRECTORY == answer->type ? 1 : -1;
+		fib->fib_EntryType = fib->fib_DirEntryType; /* FIXME: Is this right? */
 		construct_bstr(fib->fib_FileName, sizeof(fib->fib_FileName), answer->name);
 		/* Set protection bits for regular files. These set bits in the
 		 * protection mask indicate forbidden actions, not caps. Really weird.
