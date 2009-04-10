@@ -1,0 +1,3 @@
+- Close controller when target process exits.
+- Report failure if target process fails to start.
+- Capture remote output and channel back to controller.
