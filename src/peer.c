@@ -2,6 +2,7 @@
 #include "peer.h"
 #include "rlnet.h"
 #include "socket_includes.h"
+#include "version.h"
 
 #include <stdio.h>
 
@@ -139,8 +140,8 @@ static void on_transmit_handshake(peer_t *self, const rl_msg_t *param_unused_)
 	request->hdr_type = RL_MSG_HANDSHAKE_REQUEST;
 	request->hdr_flags = 0;
 	request->hdr_sequence_num = 0;
-	request->version_major = 20;
-	request->version_minor = 0;
+	request->version_major = RLAUNCH_VER_MAJOR;
+	request->version_minor = RLAUNCH_VER_MINOR;
 
 #ifdef __AMIGA__
 	request->platform_name = "AmigaOS";
@@ -206,18 +207,32 @@ static void on_transmit_handshake(peer_t *self, const rl_msg_t *param_unused_)
 
 static void on_receive_handshake(peer_t *self, const rl_msg_t *param)
 {
-	RL_LOG_INFO(("%s: peer is %s running %s (%s)",
+	RL_LOG_INFO(("%s: peer is %s running rlaunch v%d.%d on %s (%s)",
 				self->ident,
 				param->handshake_request.node_name,
+				param->handshake_request.version_major,
+				param->handshake_request.version_minor,
 				param->handshake_request.platform_name,
 				param->handshake_request.platform_version));
 
-	/* FIXME: compare remote version to our version here */
-	if (PEER_INIT_TARGET == self->init_mode)
+	/* Require exactly the same version */
+	if (param->handshake_request.version_major == RLAUNCH_VER_MAJOR &&
+		param->handshake_request.version_major == RLAUNCH_VER_MAJOR)
 	{
-		invoke_action(self, PEER_ACTION_TRANSMIT_HANDSHAKE, NULL);
+		if (PEER_INIT_TARGET == self->init_mode)
+		{
+			invoke_action(self, PEER_ACTION_TRANSMIT_HANDSHAKE, NULL);
+		}
+		peer_set_state(self, PEER_CONNECTED);
 	}
-	peer_set_state(self, PEER_CONNECTED);
+	else
+	{
+		RL_LOG_CONSOLE(("disconnection peer %s with unsupported version %d.%d (local version " RLAUNCH_VERSION ")",
+						param->handshake_request.node_name,
+						param->handshake_request.version_major,
+						param->handshake_request.version_minor));
+		peer_set_state(self, PEER_ERROR);
+	}
 }
 
 static void on_transmit_message(peer_t *self, const rl_msg_t *param)

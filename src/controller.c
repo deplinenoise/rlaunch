@@ -4,6 +4,7 @@
 #include "rlnet.h"
 #include "socket_includes.h"
 #include "controller.h"
+#include "version.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -124,8 +125,9 @@ cleanup:
 }
 
 static const char * const usage_string =
-"\nrl-controller v0.95 (c) 2009 Andreas Fredriksson, TBL Technologies\n"
-"A networked programming testing and development solution for the Amiga.\n"
+"\nrlaunch controller v" RLAUNCH_VERSION
+"\n" RLAUNCH_LICENSE
+"\n\nA networked programming testing and development solution for the Amiga.\n"
 "\n"
 "USAGE:\n"
 " rl-controller [-fsroot <directory>] [-port <port#>] [-log [a0][dniwc..]] <hostname> <path/to/executable>\n"
@@ -137,12 +139,13 @@ static const char * const usage_string =
 "  -fsroot                Specifies the file serving directory. The executable\n"
 "                         must live in this directory as well. (default: cwd)\n"
 "  -port                  The TCP port to connect to on the remote target (default: 7001)\n"
-"  -log                   Specifies log levels\n"
-"                         0: disable everything (default)\n"
+"  -log                   Specifies log levels (default: 'c')\n"
+"                         0: disable everything\n"
 "                         a: enable everything\n"
 "                         d: enable debug channel\n"
 "                         i: enable info channel\n"
 "                         w: enable warning channel\n"
+"                         p: enable network packet channel\n"
 "                         c: enable console channel\n";
 
 static int pump_peer_state_machine(peer_t *peer)

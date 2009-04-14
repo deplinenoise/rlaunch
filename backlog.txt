@@ -3,3 +3,7 @@
 - Capture remote output and channel back to controller.
 - Support sub-streams in console output (e.g. to capture profiling data)
 - Support for command line options
+- Multiple controllers against one target:
+  - Support busy error code to prevent multiple launches (e.g. for demos)
+  - Support multiple controllers with multiple devices
+- Add password support

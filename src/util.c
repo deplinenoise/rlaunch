@@ -267,6 +267,10 @@ void rl_toggle_log_bits(const char *argument)
 			case 'i': bit = RL_INFO; break;
 			case 'w': bit = RL_WARNING; break;
 			case 'c': bit = RL_CONSOLE; break;
+			case 'p': bit = RL_PACKET; break;
+			default:
+				RL_LOG_CONSOLE(("Invalid log bit: %c", c));
+				break;
 		}
 
 		rl_log_bits ^= bit;

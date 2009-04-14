@@ -4,6 +4,7 @@
 #include "protocol.h"
 #include "rlnet.h"
 #include "socket_includes.h"
+#include "version.h"
 
 #if defined(RL_POSIX)
 #include <sys/select.h>
@@ -80,6 +81,7 @@ struct launch_msg_tag
 
 static void cmd_launcher(void)
 {
+	BPTR output_handle;
 	struct TagItem system_tags[] = {
 		{ NP_CurrentDir, (Tag) NULL }, /* filled in below */
 		{ SYS_Input, (Tag) NULL },
@@ -89,10 +91,15 @@ static void cmd_launcher(void)
 		{ TAG_DONE, 0 }
 	};
 
+	output_handle = 0;
+
 	system_tags[0].ti_Data = (Tag) MKBADDR(launch_msg.root_lock);
+	system_tags[2].ti_Data = (Tag) output_handle;
 
 	if (0 != SystemTagList(launch_msg.path, &system_tags[0]))
+	{
 		UnLock(MKBADDR(launch_msg.root_lock));
+	}
 }
 
 static void async_spawn(peer_t *peer, const char *cmd)
@@ -372,7 +379,8 @@ static void common_main(const char *bind_address, int bind_port)
 	rl_socket_t listener_fd;
 	struct sockaddr_in listen_address;
 
-	rl_log_message("rl-controller v0.97 (c) 2009 Andreas Fredriksson, TBL Technologies");
+	RL_LOG_CONSOLE(("rlaunch target " RLAUNCH_VERSION));
+   	RL_LOG_CONSOLE((RLAUNCH_LICENSE));
 
 	RL_LOG_DEBUG(("common_main: bind_address:%s, bind_port:%d", bind_address, bind_port));
 
