@@ -1,3 +1,5 @@
 - Close controller when target process exits.
 - Report failure if target process fails to start.
 - Capture remote output and channel back to controller.
+- Support sub-streams in console output (e.g. to capture profiling data)
+- Support for command line options
