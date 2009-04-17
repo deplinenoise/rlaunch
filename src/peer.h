@@ -68,10 +68,13 @@ typedef struct peer_tag
 	peer_state_t		state;
 
 	/* socket fd associated with this peer */
-	rl_socket_t				fd;
+	rl_socket_t			fd;
 
 	/* human readable name for this peer */
 	char				ident[32];
+
+	/* peer index (used to index device names on the Amiga side) */
+	int					peer_index;
 
 	/* transport buffer that stores incomplete messages and queues
 	 * output messages to be written

@@ -3,6 +3,9 @@
 
 #include "util.h"
 
+#define RL_FILEHANDLE_VIRTUAL_INPUT (0x7ffffffe)
+#define RL_FILEHANDLE_VIRTUAL_OUTPUT (0x7ffffffd)
+
 enum
 {
 	RL_PROTO_HDRF_REQUEST		= 1 << 0,
@@ -32,6 +35,7 @@ typedef enum rl_proto_neterror_tag {
 	RL_NETERR_INVALID_VALUE			= 6,
 	RL_NETERR_BAD_REQUEST			= 128,
 	RL_NETERR_TOO_MANY_FILES_OPEN	= 129,
+	RL_NETERR_SPAWN_FAILURE			= 254,
 	RL_NETERR_UNKNOWN				= 255 
 } rl_proto_neterror_t;
 

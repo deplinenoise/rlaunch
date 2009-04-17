@@ -7,6 +7,7 @@
 #include "rlnet.h"
 #include "peer.h"
 #include "protocol.h"
+#include "version.h"
 
 #define BSTR_LEN(str) (((const rl_uint8 *)str)[0])
 #define BSTR_PTR(str) (((const char *)str)+1)
@@ -33,6 +34,8 @@ static const char *rl_client_handle_type_name(rl_client_handle_type_t type)
 		case RL_HANDLE_FILE: return "file";
 		case RL_HANDLE_DIR: return "directory";
 		case RL_HANDLE_DEVICE: return "device";
+		case RL_HANDLE_VIRTUAL_INPUT: return "virtual input";
+		case RL_HANDLE_VIRTUAL_OUTPUT: return "virtual output";
 		default:
 							   return "<bogus>";
 	}
@@ -381,6 +384,7 @@ static void action_set_comment		(rl_amigafs_t *fs, struct DosPacket *packet);
 static void action_set_file_date	(rl_amigafs_t *fs, struct DosPacket *packet);
 
 static void action_findinput		(rl_amigafs_t *fs, struct DosPacket *packet);
+static void action_findoutput		(rl_amigafs_t *fs, struct DosPacket *packet);
 
 static const lookup_entry_t packet_handlers_range_1[(HANDLER_RANGE_1_LAST - HANDLER_RANGE_1_FIRST) + 1] =
 {
@@ -459,14 +463,6 @@ static void action_findinput(rl_amigafs_t *fs, struct DosPacket *packet)
     RL_LOG_DEBUG(("FINDINPUT: directory=\"%d\", name=\"%Q\"",
 				dir_handle->handle_id, packet->dp_Arg3));
 
-	/* Construct a pending open for the file. */
-	pending_op = alloc_pending(fs, packet, RL_MSG_OPEN_HANDLE_ANSWER, complete_findinput);
-	if (!pending_op)
-	{
-		error_code = ERROR_NO_FREE_STORE;
-		goto error;
-	}
-
 	/* Skip leading DEVICE: header that is sometimes present */
 	{
 		const char* colon;
@@ -475,6 +471,36 @@ static void action_findinput(rl_amigafs_t *fs, struct DosPacket *packet)
 			filename_cstr = colon+1;
 			RL_LOG_DEBUG(("FINDINPUT: dropping device prefix"));
 		}
+	}
+
+	/* See if this is a request to open the virtual input channel */
+	if (0 == rl_strcmp(filename_cstr, RLAUNCH_VIRTUAL_INPUT_FILE))
+	{
+		struct FileLock *file_lock;
+		struct FileHandle * const fh = BCPL_CAST(struct FileHandle, packet->dp_Arg1);
+		file_lock = allocate_lock(fs, RL_HANDLE_VIRTUAL_INPUT, RL_FILEHANDLE_VIRTUAL_INPUT, SHARED_LOCK, BSTR_PTR(filename_bstr), 0);
+
+		if (!file_lock)
+		{
+			error_code = ERROR_NO_FREE_STORE;
+			goto error;
+		}
+
+		RL_LOG_DEBUG(("FINDINPUT: opening virtual input channel"));
+		packet->dp_Res1 = DOSTRUE;
+		packet->dp_Res2 = 0;
+		fh->fh_Type = fs->device_port;
+		fh->fh_Arg1 = (LONG) file_lock;
+		reply_to_packet(fs, packet);
+		return;
+	}
+
+	/* Construct a pending open for the file. */
+	pending_op = alloc_pending(fs, packet, RL_MSG_OPEN_HANDLE_ANSWER, complete_findinput);
+	if (!pending_op)
+	{
+		error_code = ERROR_NO_FREE_STORE;
+		goto error;
 	}
 
 	RL_MSG_INIT(msg, RL_MSG_OPEN_HANDLE_REQUEST);
@@ -525,6 +551,8 @@ static void complete_findinput(rl_amigafs_t *fs, rl_pending_operation_t *op, con
 		}
 		else
 		{
+			packet->dp_Res1 = DOSTRUE;
+			packet->dp_Res2 = 0;
 			fh->fh_Type = fs->device_port;
 			fh->fh_Arg1 = (LONG) file_lock;
 		}
@@ -542,6 +570,73 @@ static void complete_findinput(rl_amigafs_t *fs, rl_pending_operation_t *op, con
 
 	reply_to_packet(fs, packet);
 	unlink_pending(fs, op);
+}
+
+/*
+ *	ACTION_FINDOUTPUT	Open(..., MODE_NEWFILE)
+ *
+ *	ARG1:	BPTR -	FileHandle to fill in
+ *	ARG2:	LOCK -	Lock to directory that ARG3 is relative to
+ *	ARG3:	BSTR -	Name of file to be opened (relative to ARG2)
+ *
+ *	RES1:	BOOL -	Success/Failure (DOSTRUE/DOSFALSE)
+ *	RES2:	CODE -	Failure code if RES1 = DOSFALSE
+ */
+static void action_findoutput(rl_amigafs_t *fs, struct DosPacket *packet)
+{
+	struct FileHandle * const fh =
+		BCPL_CAST(struct FileHandle, packet->dp_Arg1);
+
+	struct FileLock * const dir_lock =
+		BCPL_CAST(struct FileLock, packet->dp_Arg2);
+
+	struct FileLock *file_lock;
+
+	rl_client_handle_t * const dir_handle = HANDLE_FROM_LOCK(dir_lock);
+
+	const void *filename_bstr = BCPL_CAST(const void, packet->dp_Arg3);
+	const char *filename_cstr = BSTR_PTR(filename_bstr);
+
+	rl_pending_operation_t *pending_op = NULL;
+	LONG error_code = 0;
+	rl_msg_t msg;
+
+    RL_LOG_DEBUG(("FINDOUTPUT: directory=\"%d\", name=\"%Q\"",
+				dir_handle->handle_id, packet->dp_Arg3));
+
+	/* Skip leading DEVICE: header that is sometimes present */
+	{
+		const char* colon;
+		if (NULL != (colon = rl_strchr(filename_cstr, ':')))
+		{
+			filename_cstr = colon+1;
+			RL_LOG_DEBUG(("FINDOUTPUT: dropping device prefix"));
+		}
+	}
+
+	/* We only support writing to the virtual output file. */
+	if (0 != rl_strcmp(filename_cstr, RLAUNCH_VIRTUAL_OUTPUT_FILE))
+	{
+		RL_LOG_DEBUG(("FINDOUTPUT: attempt to write to file beside virtual output file"));
+		goto error;
+	}
+
+	file_lock = allocate_lock(fs, RL_HANDLE_VIRTUAL_OUTPUT, RL_FILEHANDLE_VIRTUAL_OUTPUT, EXCLUSIVE_LOCK, BSTR_PTR(filename_bstr), 0);
+	if (!file_lock)
+		goto error;
+
+	fh->fh_Type = fs->device_port;
+	fh->fh_Arg1 = (LONG) file_lock;
+
+	packet->dp_Res1 = DOSTRUE;
+	packet->dp_Res2 = 0;
+	reply_to_packet(fs, packet);
+	return;
+
+error:
+	packet->dp_Res1 = DOSFALSE;
+	packet->dp_Res2 = error_code;
+	reply_to_packet(fs, packet);
 }
 
 /*
@@ -1239,6 +1334,107 @@ complete_read(rl_amigafs_t *self, rl_pending_operation_t *op, const rl_msg_t *ms
 }
 
 /*
+ *	ACTION_WRITE Write(...)
+ *
+ *	ARG1:	ARG1 -	fh_Arg1 field of opened FileHandle
+ *	ARG2:	APTR -	Buffer to write data from
+ *	ARG3:	LONG -	Number of bytes to write
+ *
+ *	RES1:	LONG -	Number of bytes written. -1 indicates ERROR
+ *	RES2:	CODE -	Failure code if RES1 = -1
+ */
+
+static void
+complete_write(rl_amigafs_t *self, rl_pending_operation_t *op, const rl_msg_t *msg);
+
+static int
+transmit_write_request(peer_t *peer, rl_client_handle_t *handle, rl_pending_operation_t *op, char* data, rl_uint32 count);
+
+static void
+action_write(rl_amigafs_t *self, struct DosPacket *packet)
+{
+	rl_msg_t msg;
+	LONG error_code = ERROR_SEEK_ERROR; /* TODO: What to use for real read errors? */
+	struct FileLock *lock = (struct FileLock *) packet->dp_Arg1;
+	rl_client_handle_t *handle = HANDLE_FROM_LOCK(lock);
+	rl_pending_operation_t *pending_op;
+
+	RL_LOG_DEBUG(("action_write \"%s\", %d bytes from %p", handle->path, (int) packet->dp_Arg3, packet->dp_Arg2));
+
+	if (!(pending_op = alloc_pending(self, packet, RL_MSG_WRITE_FILE_ANSWER, complete_write)))
+	{
+		error_code = ERROR_NO_FREE_STORE;
+		goto error;
+	}
+
+	if (0 != transmit_write_request(self->peer, handle, pending_op, (char*) packet->dp_Arg2, RL_MIN_MACRO(packet->dp_Arg3, 4096)))
+		goto error;
+
+	return;
+
+error:
+	if (pending_op)
+		unlink_pending(self, pending_op);
+
+	packet->dp_Res1 = DOSFALSE;
+	packet->dp_Res2 = error_code;
+	reply_to_packet(self, packet);
+}
+
+static void
+complete_write(rl_amigafs_t *self, rl_pending_operation_t *op, const rl_msg_t *msg) 
+{
+	struct DosPacket *packet;
+	char *curr_ptr, *end_ptr;
+	rl_client_handle_t *handle;
+   
+	packet = op->input_packet;
+	handle = HANDLE_FROM_LOCK((struct FileLock *) packet->dp_Arg1);
+	curr_ptr = op->detail.write.source + op->detail.write.length;
+	end_ptr = (char*)packet->dp_Arg2 + packet->dp_Arg3;
+
+	RL_LOG_DEBUG(("Completing write of %u bytes", op->detail.write.length));
+
+	/* If there's more data to write, just keep sending. */
+	if (curr_ptr < end_ptr)
+	{
+		/* Just grab the next sequence number and requeue the same operation */
+		op->request_seqno = self->seqno++;
+
+		if (0 != transmit_write_request(self->peer, handle, op, curr_ptr, RL_MIN_MACRO(end_ptr - curr_ptr, 4096)))
+		{
+			packet->dp_Res1 = curr_ptr - (char*)packet->dp_Arg2;
+			packet->dp_Res2 = ERROR_SEEK_ERROR;
+			reply_to_packet(self, packet);
+			unlink_pending(self, op);
+		}
+	}
+	else
+	{
+		packet->dp_Res1 = packet->dp_Arg3;
+		packet->dp_Res2 = 0;
+		reply_to_packet(self, packet);
+		unlink_pending(self, op);
+	}
+}
+
+static int
+transmit_write_request(peer_t *peer, rl_client_handle_t *handle, rl_pending_operation_t *op, char* data, rl_uint32 count)
+{
+	rl_msg_t msg;
+	RL_MSG_INIT(msg, RL_MSG_WRITE_FILE_REQUEST);
+	msg.write_file_request.hdr_sequence_num	= op->request_seqno;
+	msg.write_file_request.handle			= handle->handle_id;
+	msg.write_file_request.data.base		= data;
+	msg.write_file_request.data.length		= count;
+
+	op->detail.write.source = data;
+	op->detail.write.length = count;
+
+	return peer_transmit_message(peer, &msg);
+}
+
+/*
  *	ACTION_SEEK	Seek(...)
  *
  *	ARG1:	ARG1 -	fh_Arg1 field of opened FileHandle
@@ -1367,7 +1563,10 @@ static void process_fs_packet(rl_amigafs_t *self, struct DosPacket* packet)
 	{
 		handler = action_read;
 	}
-
+	else if (ACTION_WRITE == packet_type)
+	{
+		handler = action_write;
+	}
 	/* handle common packets in the continous low range via a lookup table */
 	else if (packet_type >= HANDLER_RANGE_1_FIRST && packet_type <= HANDLER_RANGE_1_LAST)
 	{
@@ -1388,11 +1587,9 @@ static void process_fs_packet(rl_amigafs_t *self, struct DosPacket* packet)
 			handler = action_findinput;
 			break;
 
-			/*
 		case ACTION_FINDOUTPUT:
 			handler = action_findoutput;
 			break;
-			*/
 
 		case ACTION_SEEK:
 			handler = action_seek;
@@ -1569,7 +1766,7 @@ static void action_die(rl_amigafs_t *self, struct DosPacket* packet) {}
    ACTION_CURRENT_VOLUME
 
 Purpose: identify the volume belonging to a FileHandle
-Implements: used by AmigaDOS function ErrorReport(REPORT_STREAM)t
+Implements: used by AmigaDOS function ErrorReport(REPORT_STREAM)
 dp_Type - ACTION_CURRENT_VOLUME (7)
 dp_Arg1 - fh->fh_Argl
 dp_Res1 - BPTR to struct DeviceList

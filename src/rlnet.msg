@@ -53,6 +53,12 @@ read_file/request
 read_file/answer
 	.data				: array
 
+write_file/request
+	.handle				: longword
+	.data				: array
+
+write_file/answer
+
 find_next_file/request
 	.handle				: longword
 	.reset				: byte
@@ -67,5 +73,12 @@ find_next_file/answer
 
 launch_executable/request
 	.path				: string
+	.arguments			: string
 
 launch_executable/answer
+
+executable_done/request
+	.result_code		: longword
+
+executable_done/answer
+

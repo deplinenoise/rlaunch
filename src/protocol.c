@@ -69,7 +69,7 @@ int rl_encode_array(unsigned char **cursor, int *size, const rl_net_array_t arra
 		return -1;
 
 	rl_encode_int4(cursor, array.length);
-	memcpy(*cursor, array.base, array.length);
+	rl_memcpy(*cursor, array.base, array.length);
 	*cursor += array.length;
 	*size -= (int)(4 + array.length);
 	return 0;

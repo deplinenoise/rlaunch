@@ -16,13 +16,28 @@
 
 static int on_connected(peer_t *peer)
 {
+	char arguments[256];
 	rl_msg_t msg;
 	rl_msg_launch_executable_request_t *req = &msg.launch_executable_request;
 	rl_controller_t *self = (rl_controller_t*) peer->userdata;
 
 	RL_MSG_INIT(msg, RL_MSG_LAUNCH_EXECUTABLE_REQUEST);
 
+	/* Format arguments string. */
+	{
+		char* p = arguments;
+		char* p_max = arguments + sizeof(arguments) - 1;
+		int i=0;
+		for (i=0; i<self->arg_count && p < p_max; ++i)
+		{
+			RL_ASSERT(self->arguments[i]);
+			p += rl_format_msg(p, p_max - p, i > 0 ? " %s" : "%s", self->arguments[i]);
+		}
+		*p = '\0';
+	}
+
 	req->path = self->executable;
+	req->arguments = arguments;
 	if (0 == peer_transmit_message(peer, &msg))
 	{
 		self->state = CONTROLLER_WAIT_EXECUTABLE_LAUNCHED;
@@ -46,6 +61,11 @@ static int on_message_received(peer_t *peer, const rl_msg_t *msg)
 			if (RL_MSG_LAUNCH_EXECUTABLE_ANSWER == rl_msg_kind_of(msg))
 			{
 				self->state = CONTROLLER_FILE_SERVING;
+			}
+			else if (RL_MSG_EXECUTABLE_DONE_REQUEST == rl_msg_kind_of(msg))
+			{
+				RL_LOG_INFO(("executable completed with rc=%d", msg->executable_done_request.result_code));
+				return 1;
 			}
 			else
 			{
@@ -129,24 +149,29 @@ static const char * const usage_string =
 "\n" RLAUNCH_LICENSE
 "\n\nA networked programming testing and development solution for the Amiga.\n"
 "\n"
-"USAGE:\n"
-" rl-controller [-fsroot <directory>] [-port <port#>] [-log [a0][dniwc..]] <hostname> <path/to/executable>\n"
+"Usage:\n"
+" rl-controller [-fsroot <r>] [-port <#>] [-log <..>] <host> <exe_path> [args]\n"
 "\n"
-"  <hostname>             Hostname to connect to (mandatory)\n"
-"  <path/to/executable>   Path to executable relative to fsroot, with forward slashes. (mandatory)\n"
+"Arguments:\n"
+"  <host>         Hostname to connect to (mandatory)\n"
 "\n"
-"  Optional parameters:\n"
-"  -fsroot                Specifies the file serving directory. The executable\n"
-"                         must live in this directory as well. (default: cwd)\n"
-"  -port                  The TCP port to connect to on the remote target (default: 7001)\n"
-"  -log                   Specifies log levels (default: 'c')\n"
-"                         0: disable everything\n"
-"                         a: enable everything\n"
-"                         d: enable debug channel\n"
-"                         i: enable info channel\n"
-"                         w: enable warning channel\n"
-"                         p: enable network packet channel\n"
-"                         c: enable console channel\n";
+"  <exe_path>     Path to executable relative to fsroot, with forward\n"
+"                 slashes. Absolute Amiga paths can also be used to run\n"
+"                 remote programs, e.g. c:info(mandatory)\n"
+"\n"
+"  [args]         Optional arguments to pass to Amiga executable.\n"
+"\n"
+"Options:\n"
+"  -fsroot        Specifies the file serving directory. The executable\n"
+"                 must live in this directory as well. (default: cwd)\n"
+"\n"
+"  -port          The TCP port to connect to (default: 7001)\n"
+"\n"
+"  -log           Specifies log levels (default: 'c')\n"
+"                 0: disable everything    a: everything\n"
+"                 d: debug channel         i: info channel\n"
+"                 w: warning channel       p: network packet channel\n"
+"                 c: console channel\n";
 
 static int pump_peer_state_machine(peer_t *peer)
 {
@@ -203,23 +228,24 @@ int main(int argc, char** argv)
 
 	/* parse the command line options */
 	{
+		int options_done = 0;
 		int i;
 		for (i = 1; i < argc; ++i)
 		{
 			const char *this_arg = argv[i];
 			const char *next_arg = (i+1) < argc ? argv[i+1] : "";
 
-			if (0 == strcmp("-fsroot", this_arg))
+			if (!options_done && 0 == strcmp("-fsroot", this_arg))
 			{
 				++i;
 				fsroot = next_arg;
 			}
-			else if (0 == strcmp("-port", this_arg))
+			else if (!options_done && 0 == strcmp("-port", this_arg))
 			{
 				++i;
 				peer_port = next_arg;
 			}
-			else if (0 == strcmp("-log", this_arg))
+			else if (!options_done && 0 == strcmp("-log", this_arg))
 			{
 				++i;
 				rl_toggle_log_bits(next_arg);
@@ -227,10 +253,17 @@ int main(int argc, char** argv)
 			else if (!peer_hostname)
 			{
 				peer_hostname = this_arg;
+				options_done = 1;
 			}
 			else if (!ctrl.executable)
 			{
 				ctrl.executable = this_arg;
+				options_done = 1;
+			}
+			else if (options_done && ctrl.arg_count < sizeof(ctrl.arguments)/sizeof(ctrl.arguments[0]))
+			{
+				RL_LOG_DEBUG(("arg%d = %s", ctrl.arg_count, this_arg));
+				ctrl.arguments[ctrl.arg_count++] = this_arg;
 			}
 			else
 			{
@@ -254,7 +287,31 @@ int main(int argc, char** argv)
 
 	ctrl.state = CONTROLLER_INITIAL;
 	ctrl.root_handle.type = RL_NODE_TYPE_DIRECTORY;
-	rl_string_copy(sizeof(ctrl.root_handle.native_path), ctrl.root_handle.native_path, fsroot);
+
+	if (fsroot[0])
+	{
+		rl_string_copy(sizeof(ctrl.root_handle.native_path), ctrl.root_handle.native_path, fsroot);
+	}
+	else
+	{
+#ifdef WIN32
+		GetCurrentDirectoryA(sizeof(ctrl.root_handle.native_path), ctrl.root_handle.native_path);
+#else
+#error Implement me
+#endif
+	}
+
+	/* Set up virtual input/output files. */
+	ctrl.vinput_handle.type = RL_NODE_TYPE_FILE;
+	ctrl.voutput_handle.type = RL_NODE_TYPE_FILE;
+	rl_string_copy(sizeof(ctrl.vinput_handle.native_path), ctrl.vinput_handle.native_path, "(virtual input)");
+	rl_string_copy(sizeof(ctrl.voutput_handle.native_path), ctrl.voutput_handle.native_path, "(virtual output)");
+#ifdef WIN32
+	ctrl.vinput_handle.handle = GetStdHandle(STD_INPUT_HANDLE);
+	ctrl.voutput_handle.handle = GetStdHandle(STD_OUTPUT_HANDLE);
+#else
+#error Implement me
+#endif
 
 	/* establish a connection */
 	if (NULL == (peer = connect_to_target(peer_hostname, peer_port)))

@@ -25,6 +25,8 @@ typedef enum rl_client_handle_type_tag
 {
 	RL_HANDLE_FILE,
 	RL_HANDLE_DIR,
+	RL_HANDLE_VIRTUAL_INPUT,
+	RL_HANDLE_VIRTUAL_OUTPUT,
 	RL_HANDLE_DEVICE
 } rl_client_handle_type_t;
 
@@ -62,7 +64,7 @@ typedef struct rl_pending_read_tag
 
 typedef struct rl_pending_write_tag
 {
-	const void *source;
+	char *source;
 	size_t length;
 } rl_pending_write_t;
 

@@ -35,10 +35,14 @@ typedef struct rl_controller_tag
 
 	/* File server state */
 	rl_filehandle_t root_handle;
+	rl_filehandle_t vinput_handle;
+	rl_filehandle_t voutput_handle;
 	rl_filehandle_t handles[RL_MAX_FILE_HANDLES];
 
 	/* Startup options */
 	const char* executable;
+	const char *arguments[16];
+	int arg_count;
 } rl_controller_t;
 
 struct peer_tag;

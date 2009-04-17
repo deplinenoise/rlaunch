@@ -178,6 +178,7 @@ void rl_memset(void *dest, int value, size_t len);
 long rl_time(const void* ignored);
 void rl_abort(void);
 const char* rl_strchr(const char *input, char ch);
+int rl_strcmp(const char *lhs, const char* rhs);
 
 #ifdef NDEBUG
 #define RL_ASSERT(x) do { } while(0)
@@ -191,6 +192,7 @@ const char* rl_strchr(const char *input, char ch);
 
 #include <assert.h>
 #include <string.h>
+#define rl_strcmp strcmp
 #define rl_strlen strlen
 #define rl_memcpy memcpy
 #define rl_memset memset

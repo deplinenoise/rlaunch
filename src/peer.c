@@ -399,6 +399,8 @@ static const rl_transport_callbacks_t peer_transport_callbacks =
 	peer_deliver_incoming
 };
 
+static int peer_count = 0;
+
 int peer_init(
 		peer_t *self,
 		rl_socket_t fd,
@@ -456,6 +458,9 @@ int peer_init(
 	{
 		peer_set_state(self, PEER_WAIT_HANDSHAKE);
 	}
+
+	self->peer_index = (peer_count++) % 10; 
+
 	return 0;
 }
 

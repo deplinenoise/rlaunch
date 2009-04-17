@@ -6,6 +6,7 @@
 
 #if defined(WIN32)
 #include <windows.h>
+#include <stdio.h>
 #elif defined(RL_POSIX)
 #include <sys/types.h>
 #include <sys/stat.h>
@@ -52,6 +53,14 @@ static rl_filehandle_t *get_handle_from_id(rl_controller_t *self, peer_t *peer, 
 	if ((rl_uint32) -1 == handle_id)
 	{
 		return &self->root_handle;
+	}
+	else if (RL_FILEHANDLE_VIRTUAL_INPUT == handle_id)
+	{
+		return &self->vinput_handle;
+	}
+	else if (RL_FILEHANDLE_VIRTUAL_OUTPUT == handle_id)
+	{
+		return &self->voutput_handle;
 	}
 	else if (handle_id >= RL_MAX_FILE_HANDLES)
 	{
@@ -301,6 +310,11 @@ static int close_handle_request(peer_t *peer, const rl_msg_t *msg)
 {
 	rl_controller_t * const self = (rl_controller_t *) peer->userdata;
 	rl_filehandle_t *handle;
+
+	/* Ignore attempts to close virtual input/output */
+	if (RL_FILEHANDLE_VIRTUAL_INPUT == msg->close_handle_request.handle ||
+		RL_FILEHANDLE_VIRTUAL_OUTPUT == msg->close_handle_request.handle)
+		return 0;
    
 	if (NULL == (handle = get_handle_from_id(self, peer, msg->close_handle_request.handle)))
 		return reply_with_error(peer, msg, RL_NETERR_INVALID_VALUE);
@@ -463,10 +477,8 @@ static int read_file_request(peer_t *peer, const rl_msg_t *msg)
 	LARGE_INTEGER pos;
 #endif
 
-	if (request->handle >= RL_MAX_FILE_HANDLES)
+	if (NULL == (handle = get_handle_from_id(self, peer, request->handle)))
 		return reply_with_error(peer, msg, RL_NETERR_INVALID_VALUE);
-
-	handle = &self->handles[request->handle];
 	
 #ifdef WIN32
 	if (INVALID_HANDLE_VALUE == handle->handle)
@@ -475,8 +487,12 @@ static int read_file_request(peer_t *peer, const rl_msg_t *msg)
 	pos.LowPart = request->offset_lo;
 	pos.HighPart = request->offset_hi;
 
-	if (!SetFilePointerEx(handle->handle, pos, NULL, FILE_BEGIN))
-		return reply_with_error(peer, msg, RL_NETERR_IO_ERROR);
+	/* Ignore seeks in standard input */
+	if (handle != &self->vinput_handle)
+	{
+	   	if (!SetFilePointerEx(handle->handle, pos, NULL, FILE_BEGIN))
+			return reply_with_error(peer, msg, RL_NETERR_IO_ERROR);
+	}
 
 	{
 		DWORD size_to_read = sizeof(read_buffer);
@@ -529,12 +545,47 @@ static int read_file_request(peer_t *peer, const rl_msg_t *msg)
 	return 0;
 }
 
+static int write_file_request(peer_t *peer, const rl_msg_t *msg)
+{
+	rl_msg_t answer;
+	rl_controller_t * const self = (rl_controller_t *) peer->userdata;
+	rl_filehandle_t *handle;
+	const rl_msg_write_file_request_t * request;
+   
+	request	= &msg->write_file_request;
+	handle = get_handle_from_id(self, peer, request->handle);
+
+	RL_LOG_DEBUG(("write %d bytes against %s", request->data.length, handle->native_path));
+
+#ifdef WIN32
+	if (handle == &self->voutput_handle)
+	{
+		fwrite(request->data.base, 1, request->data.length, stdout);
+	}
+	else
+	{
+		RL_LOG_WARNING(("generic file write not implemented"));
+	}
+
+	RL_MSG_INIT(answer, RL_MSG_WRITE_FILE_ANSWER);
+	answer.write_file_answer.hdr_in_reply_to = request->hdr_sequence_num;
+	peer_transmit_message(peer, &answer);
+#else
+#error fixme
+#endif
+
+	return 0;
+}
+
 int rl_file_serve(peer_t *peer, const rl_msg_t *msg)
 {
 	switch (rl_msg_kind_of(msg))
 	{
 		case RL_MSG_READ_FILE_REQUEST:
 			read_file_request(peer, msg);
+			break;
+		case RL_MSG_WRITE_FILE_REQUEST:
+			write_file_request(peer, msg);
 			break;
 		case RL_MSG_OPEN_HANDLE_REQUEST:
 			open_handle_request(peer, msg);

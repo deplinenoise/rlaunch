@@ -35,11 +35,12 @@ typedef struct rl_amigafs_tag { char dummy; } rl_amigafs_t;
 #endif
 
 #ifndef __VBCC__
-struct ExecBase *SysBase = 0;
+struct ExecBase *SysBase = NULL;
 #else
 extern struct ExecBase *SysBase;
 #endif
-struct DosLibrary *DOSBase = 0;
+struct DosLibrary *DOSBase = NULL;
+static struct MsgPort* g_process_msg_port = NULL;
 
 #elif defined(WIN32)
 static volatile long sigbreak_occured = 0;
@@ -73,63 +74,182 @@ static rl_socket_t add_peers_to_fd_set(fd_set *read_fds, fd_set *write_fds, peer
 }
 
 #if defined(__AMIGA__)
-struct launch_msg_tag
+typedef struct launch_msg_tag
 {
-	char path[128];
+	struct Message msg_base;
+	const char* device_name;
+	char command_path[128];
+	char input_path[64];
+	char output_path[64];
+	char arguments[256];
+	int peer_index;
 	struct FileLock *root_lock;
-} launch_msg;
+	LONG result_code;
+} launch_msg_t;
 
-static void cmd_launcher(void)
+static __saveds ULONG cmd_launcher(void)
 {
-	BPTR output_handle;
+	launch_msg_t *launch_msg;
+	BPTR ihandle = 0, ohandle = 0;
+	struct DosLibrary *DOSBase = 0;
+	struct ExecBase *SysBase;
+	char cmdline_with_args[512];
+
 	struct TagItem system_tags[] = {
-		{ NP_CurrentDir, (Tag) NULL }, /* filled in below */
-		{ SYS_Input, (Tag) NULL },
-		{ SYS_Output, (Tag) NULL },
-		{ SYS_Asynch, TRUE },
-		{ SYS_UserShell, TRUE },
+		{ NP_CurrentDir,			0 }, /* filled in below */
+		{ SYS_Input,				0 },
+		{ SYS_Output,				0 },
+		{ SYS_Asynch,				FALSE },
+		{ SYS_UserShell,			TRUE },
+		{ NP_CloseInput,			FALSE },
+		{ NP_CloseOutput,			FALSE },
 		{ TAG_DONE, 0 }
 	};
 
-	output_handle = 0;
+	SysBase = *((struct ExecBase**) 4);
 
-	system_tags[0].ti_Data = (Tag) MKBADDR(launch_msg.root_lock);
-	system_tags[2].ti_Data = (Tag) output_handle;
+	if (!(DOSBase = (struct DosLibrary *) OpenLibrary("dos.library", 37)))
+		goto leave;
 
-	if (0 != SystemTagList(launch_msg.path, &system_tags[0]))
+	/* Wait for the launch message to arrive. */
 	{
-		UnLock(MKBADDR(launch_msg.root_lock));
+		struct Process* this_proc = (struct Process *) FindTask(NULL);
+		WaitPort(&this_proc->pr_MsgPort);
+		launch_msg = (launch_msg_t*) GetMsg(&this_proc->pr_MsgPort);
 	}
+
+	/* Open input and output file handles */
+	ihandle = Open(launch_msg->input_path, MODE_OLDFILE);
+	ohandle = Open(launch_msg->output_path, MODE_NEWFILE);
+
+	/* Populate the relevant tags with handle data */
+	system_tags[0].ti_Data = (Tag) MKBADDR(launch_msg->root_lock);
+	system_tags[1].ti_Data = (Tag) ihandle;
+	system_tags[2].ti_Data = (Tag) ohandle;
+
+	/* Format "<cmd> <args>" or "<cmd>" */
+	if (launch_msg->arguments[0])
+		rl_format_msg(cmdline_with_args, sizeof(cmdline_with_args), "%s %s",
+					  launch_msg->command_path, launch_msg->arguments);
+	else
+		rl_format_msg(cmdline_with_args, sizeof(cmdline_with_args), "%s",
+					  launch_msg->command_path);
+
+	if (0 != SystemTagList(cmdline_with_args, &system_tags[0]))
+	{
+		/* If SystemTagList() fails we have to clean up the current directory
+		 * lock manually */
+		UnLock(MKBADDR(launch_msg->root_lock));
+		launch_msg->result_code = 1;
+	}
+	else
+	{
+		launch_msg->result_code = 0;
+	}
+
+	RL_LOG_DEBUG(("[thread] command %s completed with code ",
+				  launch_msg->command_path, launch_msg->result_code));
+
+	/* The handles have not been closed, so clean them up now. */
+	if (ihandle) Close(ihandle);
+	if (ohandle) Close(ohandle);
+
+	/* Reply to parent with result of the execution. */
+	ReplyMsg((struct Message*) launch_msg);
+
+leave:
+	if (DOSBase)
+		CloseLibrary((struct Library*) DOSBase);
+	return 0;
 }
 
-static void async_spawn(peer_t *peer, const char *cmd)
+static int async_spawn(peer_t *peer, const char *cmd, const char *arguments)
 {
+	char device_name[32];
+	struct Process *launcher_proc = NULL;
 	rl_amigafs_t * const fs = (rl_amigafs_t *) peer->userdata;
+	launch_msg_t * const launch_msg = RL_ALLOC_TYPED_ZERO(launch_msg_t);
 
 	struct TagItem launch_tags[] =
 	{
-		NP_Entry,				(ULONG)cmd_launcher,
-		NP_StackSize,			8000,
-		NP_Name,				(ULONG)"Process Launcher",
-		NP_Cli,					TRUE,
-		NP_Input,				(Tag) NULL,
-		NP_Output,				(Tag) NULL,
-		NP_CloseInput,			FALSE,
-		NP_CloseOutput,			FALSE,
-		TAG_DONE,				0
+		{ NP_Output,			0 },
+		{ NP_Entry,				(ULONG)cmd_launcher },
+		{ NP_StackSize,			8000 },
+		{ NP_Name,				(ULONG)"Process Launcher" },
+		{ NP_Cli,				TRUE },
+		{ NP_CloseInput,		FALSE },
+		{ NP_CloseOutput,		FALSE },
+		{ TAG_DONE,				0 }
 	};
 
-	struct Process *launcher_proc;
+	if (!launch_msg)
+		goto cleanup;
 
-	rl_format_msg(launch_msg.path, sizeof(launch_msg.path), "%s", cmd);
-	launch_msg.root_lock = rl_amigafs_alloc_root_lock(fs, SHARED_LOCK);
+	/* Store peer index rather than peer pointer, as the peer might disconnect
+	 * while the command is running. */
+	launch_msg->peer_index = peer->peer_index;
 
-	if (!(launcher_proc = CreateNewProc(&launch_tags[0])))
+	launch_tags[0].ti_Data = (Tag) Output();
+
+	/* Produce e.g. "TBL2" */
+	rl_format_msg(device_name, sizeof(device_name), RLAUNCH_BASE_DEVICE_NAME "%d", peer->peer_index);
+
+	/* Start the executable in the network device root unless it is an absolute
+	 * path, in which case we blindly just use that. This is useful to run e.g.
+	 * c:list and other stuff as a simple remote shell.
+	 */
+	if (NULL == rl_strchr(cmd, ':'))
+		rl_format_msg(launch_msg->command_path, sizeof(launch_msg->command_path),
+					  "%s:%s", device_name, cmd);
+	else
+		rl_string_copy(sizeof(launch_msg->command_path), launch_msg->command_path, cmd);
+
+	/* Copy argument string */
+	rl_string_copy(sizeof(launch_msg->arguments), launch_msg->arguments, arguments);
+
+	RL_LOG_INFO(("launch cmd string: %s", launch_msg->command_path));
+	RL_LOG_INFO(("launch cmd args: %s", launch_msg->arguments));
+
+	/* Produce e.g. "TBL2:+virtual-input+ */
+	rl_format_msg(launch_msg->input_path, sizeof(launch_msg->input_path),
+				  "%s:%s", device_name, RLAUNCH_VIRTUAL_INPUT_FILE);
+	RL_LOG_INFO(("launch input: %s", launch_msg->input_path));
+
+	/* Produce e.g. "TBL2:+virtual-output+ */
+	rl_format_msg(launch_msg->output_path, sizeof(launch_msg->output_path),
+				  "%s:%s", device_name, RLAUNCH_VIRTUAL_OUTPUT_FILE);
+	RL_LOG_INFO(("launch output: %s", launch_msg->output_path));
+
+	/* Allocate a root lock structure as if opened by Open() on the device. The
+	 * launcher process will take ownership of the volume lock and use that as
+	 * the current directory of the spawned executable. This could indeed have
+	 * been done by the thread through Open(), but we save some time and just
+	 * allocate the lock here.
+	 */
+	launch_msg->root_lock = rl_amigafs_alloc_root_lock(fs, SHARED_LOCK);
+
+	if (!(launcher_proc = CreateNewProcTagList(launch_tags)))
 	{
-		rl_amigafs_free_lock(fs, launch_msg.root_lock);
 		RL_LOG_WARNING(("Couldn't kick launcher thread"));
-		return;
+		goto cleanup;
 	}
+
+	/* Sent the launch message to the thread which will take ownership of it. */
+	launch_msg->msg_base.mn_ReplyPort = g_process_msg_port;
+	launch_msg->msg_base.mn_Length = sizeof(launch_msg_t);
+	PutMsg(&launcher_proc->pr_MsgPort, (struct Message*) launch_msg);
+	return 0;
+
+cleanup:
+	if (launch_msg)
+	{
+		if (launch_msg->root_lock)
+		{
+			rl_amigafs_free_lock(fs, launch_msg->root_lock);
+		}
+		RL_FREE_TYPED(launch_msg_t, launch_msg);
+	}
+	return 1;
 }
 #endif
 
@@ -137,20 +257,23 @@ static void async_spawn(peer_t *peer, const char *cmd)
 static int on_launch_executable_request(peer_t *peer, const rl_msg_t *msg)
 {
 	rl_msg_t answer;
+	int spawn_result = 1;
+	RL_LOG_INFO(("launch executable: '%s'", msg->launch_executable_request.path));
 
 #if defined(__AMIGA__)
-	char exe_path[108];
-
-	/* Start the executable in the network device root */
-	rl_format_msg(exe_path, sizeof(exe_path), "TBL0:%s", msg->launch_executable_request.path);
-
-	RL_LOG_INFO(("launch executable: '%s'", exe_path));
-	async_spawn(peer, exe_path);
-
+	spawn_result = async_spawn(peer, msg->launch_executable_request.path, msg->launch_executable_request.arguments);
 #endif
 
-	RL_MSG_INIT(answer, RL_MSG_LAUNCH_EXECUTABLE_ANSWER);
-	answer.launch_executable_answer.hdr_in_reply_to = msg->launch_executable_request.hdr_sequence_num;
+	if (0 == spawn_result)
+	{
+		RL_MSG_INIT(answer, RL_MSG_LAUNCH_EXECUTABLE_ANSWER);
+		answer.launch_executable_answer.hdr_in_reply_to = msg->launch_executable_request.hdr_sequence_num;
+	}
+	else
+	{
+		RL_MSG_INIT(answer, RL_MSG_ERROR_ANSWER);
+		answer.error_answer.error_code = RL_NETERR_SPAWN_FAILURE;
+	}
 	return peer_transmit_message(peer, &answer);
 }
 
@@ -221,11 +344,16 @@ static peer_t *accept_peer(rl_socket_t server_fd)
 	}
 
 #if defined(__AMIGA__)
-	if (0 != rl_amigafs_init(amifs, peer, "TBL0"))
 	{
-		peer_destroy(peer);
-		RL_LOG_WARNING(("couldn't init amiga fs"));
-		goto error_cleanup;
+		char device_name[32];
+		rl_format_msg(device_name, sizeof(device_name), RLAUNCH_BASE_DEVICE_NAME "%d", peer->peer_index);
+
+		if (0 != rl_amigafs_init(amifs, peer, device_name))
+		{
+			RL_LOG_WARNING(("couldn't init amiga fs %s for peer %s", device_name, peer->ident));
+			peer_destroy(peer);
+			goto error_cleanup;
+		}
 	}
 #endif
 
@@ -258,6 +386,9 @@ static void serve(const rl_socket_t server_fd)
 		peer_t *new_peer;
 
 #if defined(__AMIGA__)
+		/* Also wake on messages due to process termination */
+		signal_mask |= 1 << g_process_msg_port->mp_SigBit;
+
 		/* On the Amiga, add the signal bits for all file systems we're serving as well. */
 		{
 			peer_t *peer = peers;
@@ -295,6 +426,34 @@ static void serve(const rl_socket_t server_fd)
 				}
 				peer = peer->next;
 			}
+		}
+
+		if (signal_mask & (1 << g_process_msg_port->mp_SigBit))
+		{
+			launch_msg_t *msg = (launch_msg_t*) GetMsg(g_process_msg_port);
+			peer_t *peer = peers;
+
+			RL_LOG_INFO(("%s launch completed; result %d", msg->command_path, msg->result_code));
+
+			while (peer)
+			{
+				if (peer->peer_index == msg->peer_index)
+				{
+					rl_msg_t req;
+					RL_MSG_INIT(req, RL_MSG_EXECUTABLE_DONE_REQUEST);
+					req.executable_done_request.result_code = msg->result_code;
+					peer_transmit_message(peer, &req);
+					break;
+				}
+				peer = peer->next;
+			}
+			
+			if (!peer)
+			{
+				RL_LOG_WARNING(("couldn't find peer to notify about completed exe launch %s", msg->command_path));
+			}
+
+			RL_FREE_TYPED(launch_msg_t, msg);
 		}
 #endif
 
@@ -507,9 +666,16 @@ int main(const char *args)
 	rl_init_socket();
 	rl_init_alloc();
 
+	/* Initialize message port for async spawn results */
+	if (!(g_process_msg_port = CreateMsgPort()))
+		goto cleanup;
+
 	common_main(bind_address, bind_port);
 
 cleanup:
+	if (g_process_msg_port)
+		DeleteMsgPort(g_process_msg_port);
+
 	rl_fini_alloc();
 	rl_fini_socket();
 
