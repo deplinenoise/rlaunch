@@ -1,4 +1,5 @@
 
+#include "config.h"
 #include "util.h"
 #include "peer.h"
 #include "rlnet.h"
@@ -12,6 +13,7 @@
 #ifdef RL_POSIX
 #include <sys/types.h>
 #include <dirent.h>
+#include <unistd.h>
 #endif
 
 static int on_connected(peer_t *peer)
@@ -279,7 +281,7 @@ int main(int argc, char** argv)
 		goto cleanup;
 	}
 
-#ifdef WIN32
+#ifdef RL_WIN32
 	if (0 != rl_init_socket())
 		goto cleanup;
 	sockets_initialized = 1;
@@ -294,10 +296,10 @@ int main(int argc, char** argv)
 	}
 	else
 	{
-#ifdef WIN32
+#ifdef RL_WIN32
 		GetCurrentDirectoryA(sizeof(ctrl.root_handle.native_path), ctrl.root_handle.native_path);
 #else
-#error Implement me
+		getcwd(ctrl.root_handle.native_path, sizeof(ctrl.root_handle.native_path));
 #endif
 	}
 
@@ -306,11 +308,12 @@ int main(int argc, char** argv)
 	ctrl.voutput_handle.type = RL_NODE_TYPE_FILE;
 	rl_string_copy(sizeof(ctrl.vinput_handle.native_path), ctrl.vinput_handle.native_path, "(virtual input)");
 	rl_string_copy(sizeof(ctrl.voutput_handle.native_path), ctrl.voutput_handle.native_path, "(virtual output)");
-#ifdef WIN32
+#ifdef RL_WIN32
 	ctrl.vinput_handle.handle = GetStdHandle(STD_INPUT_HANDLE);
 	ctrl.voutput_handle.handle = GetStdHandle(STD_OUTPUT_HANDLE);
 #else
-#error Implement me
+	ctrl.vinput_handle.handle = 0;
+	ctrl.voutput_handle.handle = 1;
 #endif
 
 	/* establish a connection */

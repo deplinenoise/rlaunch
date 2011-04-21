@@ -1,26 +1,27 @@
+#include "config.h"
 #include "socket_includes.h"
 #include "util.h"
 
-#if defined(__AMIGA__)
+#if defined(RL_AMIGA)
 #include <proto/exec.h>
 #include <proto/dos.h>
 struct Library *SocketBase = 0;
-#endif /* __AMIGA__ */
+#endif /* RL_AMIGA */
 
 #if defined(RL_POSIX)
 #include <fcntl.h>
 #endif
 
-#if defined(WIN32)
+#if defined(RL_WIN32)
 static WSADATA s_wsa_data;
 static int s_winsock_initialized = 0;
-#endif /* WIN32 */
+#endif /* RL_WIN32 */
 
 int rl_init_socket(void)
 {
-#if defined(WIN32)
+#if defined(RL_WIN32)
 	return WSAStartup(MAKEWORD(2, 0), &s_wsa_data);
-#elif defined(__AMIGA__)
+#elif defined(RL_AMIGA)
 	if ((SocketBase = OpenLibrary("bsdsocket.library", 4)) == NULL)
 	{
 		if (DOSBase)
@@ -36,9 +37,9 @@ int rl_init_socket(void)
 
 void rl_fini_socket(void)
 {
-#if defined(WIN32)
+#if defined(RL_WIN32)
 	WSACleanup();
-#elif defined(__AMIGA__)
+#elif defined(RL_AMIGA)
 	if (SocketBase)
 		CloseLibrary(SocketBase);
 #endif
@@ -46,10 +47,10 @@ void rl_fini_socket(void)
 
 int rl_configure_socket_blocking(rl_socket_t s, int should_block)
 {
-#if defined(WIN32)
+#if defined(RL_WIN32)
 	u_long value = should_block ? 0 : 1;
 	return ioctlsocket(s, FIONBIO, &value);
-#elif defined(__AMIGA__)
+#elif defined(RL_AMIGA)
 	unsigned long value = should_block ? 0 : 1;
 	return IoctlSocket(s, FIONBIO, (char*) &value);
 #else

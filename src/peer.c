@@ -1,3 +1,4 @@
+#include "config.h"
 #include "util.h"
 #include "peer.h"
 #include "rlnet.h"
@@ -6,16 +7,16 @@
 
 #include <stdio.h>
 
-#ifdef WIN32
+#ifdef RL_WIN32
 #include <windows.h>
 #endif
 
-#ifdef __AMIGA__
+#ifdef RL_AMIGA
 #include <exec/execbase.h>
 extern struct ExecBase *SysBase;
 #endif
 
-#if defined(RL_POSIX)
+#ifdef RL_POSIX
 #include <sys/utsname.h>
 #endif
 
@@ -125,7 +126,7 @@ static void on_transmit_handshake(peer_t *self, const rl_msg_t *param_unused_)
 {
 	char platform_version[128];
 
-#if defined(WIN32)
+#if defined(RL_WIN32)
 	char node_name[64];
 	DWORD node_name_size;
 	OSVERSIONINFOA version_info;
@@ -143,7 +144,7 @@ static void on_transmit_handshake(peer_t *self, const rl_msg_t *param_unused_)
 	request->version_major = RLAUNCH_VER_MAJOR;
 	request->version_minor = RLAUNCH_VER_MINOR;
 
-#ifdef __AMIGA__
+#if defined(RL_AMIGA)
 	request->platform_name = "AmigaOS";
 	request->node_name = "unknown";
 
@@ -151,7 +152,7 @@ static void on_transmit_handshake(peer_t *self, const rl_msg_t *param_unused_)
 			(int) SysBase->LibNode.lib_Version);
 	request->platform_version = platform_version;
 
-#elif defined(WIN32)
+#elif defined(RL_WIN32)
 	request->platform_name = "Microsoft Windows";
 
 	node_name_size = sizeof(node_name);
@@ -429,7 +430,7 @@ int peer_init(
 	{
 		char addr_buffer[64];
 		const struct sockaddr_in* addr_in = (const struct sockaddr_in*) address;
-#ifdef __AMIGA__
+#ifdef RL_AMIGA
 		rl_format_msg(addr_buffer, sizeof(addr_buffer),
 				"%d.%d.%d.%d",
 				(addr_in->sin_addr.s_addr >> 24) & 0xff,

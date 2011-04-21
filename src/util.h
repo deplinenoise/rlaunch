@@ -1,6 +1,8 @@
 #ifndef RLAUNCH_UTIL_H
 #define RLAUNCH_UTIL_H
 
+#include "config.h"
+
 #include <stddef.h>
 
 /*
@@ -27,11 +29,11 @@
 /*
  * Set up some fixed-size typedefs.
  */
-#if defined(__AMIGA__)
+#if defined(RL_AMIGA)
 typedef unsigned char		rl_uint8;
 typedef unsigned short		rl_uint16;
 typedef unsigned int		rl_uint32;
-#elif defined(WIN32)
+#elif defined(RL_WIN32)
 typedef unsigned char		rl_uint8;
 typedef unsigned short		rl_uint16;
 typedef unsigned int		rl_uint32;

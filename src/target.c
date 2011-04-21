@@ -1,4 +1,5 @@
 
+#include "config.h"
 #include "util.h"
 #include "peer.h"
 #include "protocol.h"
@@ -19,11 +20,11 @@ extern size_t __stack;
 size_t __stack = 65536;
 #endif
 
-#if !defined(__AMIGA__)
+#if !defined(RL_AMIGA)
 typedef struct rl_amigafs_tag { char dummy; } rl_amigafs_t;
 #endif
 
-#if defined(__AMIGA__)
+#if defined(RL_AMIGA)
 #include <proto/exec.h>
 #include <proto/dos.h>
 #include <dos/dostags.h>
@@ -36,13 +37,14 @@ typedef struct rl_amigafs_tag { char dummy; } rl_amigafs_t;
 
 #ifndef __VBCC__
 struct ExecBase *SysBase = NULL;
+struct DosLibrary *DOSBase = NULL;
 #else
 extern struct ExecBase *SysBase;
+extern struct DosLibrary *DOSBase;
 #endif
-struct DosLibrary *DOSBase = NULL;
 static struct MsgPort* g_process_msg_port = NULL;
 
-#elif defined(WIN32)
+#elif defined(RL_WIN32)
 static volatile long sigbreak_occured = 0;
 # define SIGBREAKF_CTRL_C 1
 # define WaitSelect(nfds,r,w,e,t,sigmask) (*sigmask = sigbreak_occured, select(nfds,r,w,e,t))
@@ -73,7 +75,7 @@ static rl_socket_t add_peers_to_fd_set(fd_set *read_fds, fd_set *write_fds, peer
 	return max;
 }
 
-#if defined(__AMIGA__)
+#if defined(RL_AMIGA)
 typedef struct launch_msg_tag
 {
 	struct Message msg_base;
@@ -260,7 +262,7 @@ static int on_launch_executable_request(peer_t *peer, const rl_msg_t *msg)
 	int spawn_result = 1;
 	RL_LOG_INFO(("launch executable: '%s'", msg->launch_executable_request.path));
 
-#if defined(__AMIGA__)
+#if defined(RL_AMIGA)
 	spawn_result = async_spawn(peer, msg->launch_executable_request.path, msg->launch_executable_request.arguments);
 #endif
 
@@ -279,13 +281,13 @@ static int on_launch_executable_request(peer_t *peer, const rl_msg_t *msg)
 
 static int on_message_received(peer_t *peer, const rl_msg_t *msg)
 {
-#ifdef __AMIGA__
+#ifdef RL_AMIGA
 	rl_amigafs_t *fs = (rl_amigafs_t *) peer->userdata;
 #endif
 	
 	if (RL_MSG_LAUNCH_EXECUTABLE_REQUEST == rl_msg_kind_of(msg))
 		return on_launch_executable_request(peer, msg);
-#ifdef __AMIGA__
+#ifdef RL_AMIGA
 	else if (fs)
 		return rl_amigafs_process_network_message(fs, msg);
 #endif
@@ -329,7 +331,7 @@ static peer_t *accept_peer(rl_socket_t server_fd)
 		goto error_cleanup;
 	}
 
-#if defined(__AMIGA__)
+#if defined(RL_AMIGA)
 	if (NULL == (amifs = RL_ALLOC_TYPED_ZERO(rl_amigafs_t)))
 	{
 		RL_LOG_WARNING(("out of memory allocating rl_amigafs_t"));
@@ -343,7 +345,7 @@ static peer_t *accept_peer(rl_socket_t server_fd)
 		goto error_cleanup;
 	}
 
-#if defined(__AMIGA__)
+#if defined(RL_AMIGA)
 	{
 		char device_name[32];
 		rl_format_msg(device_name, sizeof(device_name), RLAUNCH_BASE_DEVICE_NAME "%d", peer->peer_index);
@@ -361,7 +363,7 @@ static peer_t *accept_peer(rl_socket_t server_fd)
 	
 error_cleanup:
 	if (peer) RL_FREE_TYPED(peer_t, peer);
-#if defined(__AMIGA__)
+#if defined(RL_AMIGA)
 	if (amifs) RL_FREE_TYPED(rl_amigafs_t, amifs);
 #endif
 
@@ -385,7 +387,7 @@ static void serve(const rl_socket_t server_fd)
 		unsigned long signal_mask = SIGBREAKF_CTRL_C;
 		peer_t *new_peer;
 
-#if defined(__AMIGA__)
+#if defined(RL_AMIGA)
 		/* Also wake on messages due to process termination */
 		signal_mask |= 1 << g_process_msg_port->mp_SigBit;
 
@@ -413,7 +415,7 @@ static void serve(const rl_socket_t server_fd)
 
 		num_ready_fds = WaitSelect(nfds+1, &read_fds, &write_fds, NULL, &timeout, &signal_mask);
 
-#if defined(__AMIGA__)
+#if defined(RL_AMIGA)
 		/* See if any file systems need attention. */
 		{
 			peer_t *peer = peers;
@@ -502,7 +504,7 @@ static void serve(const rl_socket_t server_fd)
 					else
 						peers = next;
 
-#if defined(__AMIGA__)
+#if defined(RL_AMIGA)
 					if (ci->userdata)
 						rl_amigafs_destroy((rl_amigafs_t *)ci->userdata);
 #endif
@@ -522,7 +524,7 @@ static void serve(const rl_socket_t server_fd)
 		{
 			peer_t *next = ci->next;
 
-#if defined(__AMIGA__)
+#if defined(RL_AMIGA)
 			if (ci->userdata)
 				rl_amigafs_destroy((rl_amigafs_t *)ci->userdata);
 #endif
@@ -589,7 +591,7 @@ cleanup:
 		CloseSocket(listener_fd);
 }
 
-#if defined(WIN32)
+#if defined(RL_WIN32)
 static BOOL WINAPI ctrl_c_handler(DWORD ctrlType)
 {
 	if (CTRL_C_EVENT == ctrlType)
@@ -608,7 +610,7 @@ void ctrl_c_handler(int signum, siginfo_t *info, void *ignored)
 }
 #endif
 
-#ifdef __AMIGA__
+#ifdef RL_AMIGA
 
 int main(const char *args)
 {
@@ -694,7 +696,7 @@ int main(int argc, char** argv)
 	int cleanup_alloc = 0;
 	int cleanup_socket = 0;
 
-#if defined(WIN32)
+#if defined(RL_WIN32)
 	SetConsoleCtrlHandler(ctrl_c_handler, TRUE);
 #elif defined(RL_POSIX)
 	{

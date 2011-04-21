@@ -1,11 +1,12 @@
+#include "config.h"
 #include "util.h"
 
 #include <stdarg.h>
 #include <stddef.h>
 
-#if defined(WIN32)
+#if defined(RL_WIN32)
 typedef __int64 ssize_t;
-#elif defined(__AMIGA__)
+#elif defined(RL_AMIGA)
 typedef long ssize_t;
 #endif
 
@@ -21,7 +22,7 @@ typedef long ssize_t;
 #include <fcntl.h>
 #endif
 
-#ifdef __AMIGA__
+#ifdef RL_AMIGA
 #include <proto/exec.h>
 #include <proto/dos.h>
 #include <exec/types.h>
@@ -135,7 +136,7 @@ static void format_message(const char *format, va_list args, format_write_func w
 				break;
 			}
 
-#ifdef __AMIGA__
+#ifdef RL_AMIGA
 			case 'B':
 			{
 				long value = va_arg(args, long);
@@ -284,7 +285,7 @@ static char * const log_max = &log_buffer[sizeof(log_buffer)-1];
 static void log_flush()
 {
 	*log_cursor = 0;
-#ifdef __AMIGA__
+#ifdef RL_AMIGA
 	if (DOSBase)
 	{
 		FPuts(Output(), log_buffer);
@@ -385,7 +386,7 @@ size_t rl_format_msg(char *buffer, size_t buffer_size, const char *fmt, ...)
 #pragma popwarn
 #endif
 
-#if defined(__AMIGA__)
+#if defined(RL_AMIGA)
 
 static void *rl_amiga_pool = 0;
 
@@ -424,7 +425,7 @@ void rl_free_sized(void *ptr, size_t sz)
 	FreePooled(rl_amiga_pool, ptr, sz);
 }
 
-#else /* __AMIGA__ */
+#else /* RL_AMIGA */
 
 int rl_init_alloc(void) { return 0; }
 

@@ -1,16 +1,17 @@
 #ifndef RL_SOCKET_INCLUDES_H
 #define RL_SOCKET_INCLUDES_H
 
+#include "config.h"
 #include "socket_types.h"
 
-#if defined(__AMIGA__)
+#if defined(RL_AMIGA)
 #include <proto/socket.h>
 #include <sys/errno.h>
 #include <sys/ioctl.h>
 #endif
 
 
-#if defined(__AMIGA__) || defined(RL_POSIX)
+#if defined(RL_AMIGA) || defined(RL_POSIX)
 #include <sys/types.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
@@ -18,7 +19,7 @@
 #include <netdb.h>
 #endif
 
-#if defined(WIN32)
+#if defined(RL_WIN32)
 #include <windows.h>
 #include <winsock2.h>
 #include <ws2tcpip.h>
@@ -31,10 +32,10 @@
 #endif
 
 
-#if defined(__AMIGA__)
+#if defined(RL_AMIGA)
 # define RL_LAST_SOCKET_ERROR Errno()
 
-#elif defined(WIN32)
+#elif defined(RL_WIN32)
 #define CloseSocket closesocket
 #define RL_LAST_SOCKET_ERROR WSAGetLastError()
 #define EWOULDBLOCK WSAEWOULDBLOCK

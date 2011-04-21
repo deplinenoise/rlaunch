@@ -1,7 +1,9 @@
 #ifndef RLAUNCH_AMIGAFS_H
 #define RLAUNCH_AMIGAFS_H
 
-#ifndef __AMIGA__
+#include "config.h"
+
+#ifndef RL_AMIGA
 #error "This is an amiga source file."
 #endif
 

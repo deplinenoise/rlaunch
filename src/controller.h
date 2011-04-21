@@ -1,6 +1,8 @@
 #ifndef RL_CONTROLLER_H
 #define RL_CONTROLLER_H
 
+#include "config.h"
+
 typedef enum controller_state_tag
 {
 	CONTROLLER_INITIAL,
@@ -16,7 +18,7 @@ enum {
 
 typedef struct rl_filehandle_tag
 {
-#if defined(WIN32)
+#if defined(RL_WIN32)
 	void* handle;
 	void* find_handle;
 #elif defined(RL_POSIX)

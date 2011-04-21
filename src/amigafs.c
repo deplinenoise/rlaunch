@@ -1,4 +1,6 @@
-#ifndef __AMIGA__
+#include "config.h"
+
+#ifndef RL_AMIGA
 #error "This is an Amiga source file"
 #endif
 

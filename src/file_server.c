@@ -1,22 +1,23 @@
+#include "config.h"
 #include "controller.h"
 #include "util.h"
 #include "protocol.h"
 #include "peer.h"
 #include "rlnet.h"
 
-#if defined(WIN32)
-#include <windows.h>
 #include <stdio.h>
+
+#if defined(RL_WIN32)
+#include <windows.h>
 #elif defined(RL_POSIX)
 #include <sys/types.h>
 #include <sys/stat.h>
+#include <sys/syslimits.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <unistd.h>
 #include <dirent.h>
 #endif
-
-static char base_path[128];
 
 static int reply_with_error(peer_t *peer, const rl_msg_t *msg, rl_uint32 error_code)
 {
@@ -72,7 +73,7 @@ static rl_filehandle_t *get_handle_from_id(rl_controller_t *self, peer_t *peer, 
 	}
 }
 
-#ifdef WIN32
+#ifdef RL_WIN32
 #define NATIVE_PATH_TERMINATOR '\\'
 #else
 #define NATIVE_PATH_TERMINATOR '/'
@@ -81,7 +82,7 @@ static rl_filehandle_t *get_handle_from_id(rl_controller_t *self, peer_t *peer, 
 static int fix_path(char *dest, size_t dest_size, const char *input, const char *root_path)
 {
 	/* FIXME: Make something proper of this. */
-#ifdef WIN32
+#ifdef RL_WIN32
 	char backslash_path[128];
 	size_t i;
 
@@ -135,7 +136,7 @@ static rl_filehandle_t *make_handle(rl_controller_t *self, const char *path, int
 		return NULL; /* no free slots */
 	}
 
-#if defined(WIN32)
+#if defined(RL_WIN32)
 	{
 		DWORD dwAttributes = 0;
 
@@ -219,7 +220,11 @@ static rl_filehandle_t *make_handle(rl_controller_t *self, const char *path, int
 	}
 #elif defined(RL_POSIX)
 	{
+#if defined(RL_APPLE)
+		int flags = 0;
+#else
 		int flags = O_LARGEFILE;
+#endif
 		mode_t mode = 0;
 
 		if (mode & RL_OPENFLAG_WRITE)
@@ -319,7 +324,7 @@ static int close_handle_request(peer_t *peer, const rl_msg_t *msg)
 	if (NULL == (handle = get_handle_from_id(self, peer, msg->close_handle_request.handle)))
 		return reply_with_error(peer, msg, RL_NETERR_INVALID_VALUE);
 
-#if defined(WIN32)
+#if defined(RL_WIN32)
 	if (INVALID_HANDLE_VALUE != handle->handle)
 		CloseHandle(handle->handle);
 	handle->handle = NULL;
@@ -338,7 +343,7 @@ static int find_next_file_request(peer_t *peer, const rl_msg_t *msg)
 	rl_filehandle_t *handle;
 	rl_msg_t answer;
 
-#if defined(WIN32)
+#if defined(RL_WIN32)
 	WIN32_FIND_DATAA find_data;
 	BOOL reset = msg->find_next_file_request.reset ? TRUE : FALSE;
 	BOOL has_file = TRUE;
@@ -352,7 +357,7 @@ static int find_next_file_request(peer_t *peer, const rl_msg_t *msg)
 	if (RL_NODE_TYPE_DIRECTORY != handle->type)
 		return reply_with_error(peer, msg, RL_NETERR_NOT_A_DIRECTORY);
 
-#if defined(WIN32)
+#if defined(RL_WIN32)
 	do
 	{
 		if (reset)
@@ -473,14 +478,14 @@ static int read_file_request(peer_t *peer, const rl_msg_t *msg)
 	const rl_msg_read_file_request_t * const request =
 		&msg->read_file_request;
 
-#ifdef WIN32
+#ifdef RL_WIN32
 	LARGE_INTEGER pos;
 #endif
 
 	if (NULL == (handle = get_handle_from_id(self, peer, request->handle)))
 		return reply_with_error(peer, msg, RL_NETERR_INVALID_VALUE);
 	
-#ifdef WIN32
+#ifdef RL_WIN32
 	if (INVALID_HANDLE_VALUE == handle->handle)
 		return reply_with_error(peer, msg, RL_NETERR_NOT_A_FILE);
 
@@ -551,13 +556,12 @@ static int write_file_request(peer_t *peer, const rl_msg_t *msg)
 	rl_controller_t * const self = (rl_controller_t *) peer->userdata;
 	rl_filehandle_t *handle;
 	const rl_msg_write_file_request_t * request;
-   
+
 	request	= &msg->write_file_request;
 	handle = get_handle_from_id(self, peer, request->handle);
 
 	RL_LOG_DEBUG(("write %d bytes against %s", request->data.length, handle->native_path));
 
-#ifdef WIN32
 	if (handle == &self->voutput_handle)
 	{
 		fwrite(request->data.base, 1, request->data.length, stdout);
@@ -570,9 +574,6 @@ static int write_file_request(peer_t *peer, const rl_msg_t *msg)
 	RL_MSG_INIT(answer, RL_MSG_WRITE_FILE_ANSWER);
 	answer.write_file_answer.hdr_in_reply_to = request->hdr_sequence_num;
 	peer_transmit_message(peer, &answer);
-#else
-#error fixme
-#endif
 
 	return 0;
 }

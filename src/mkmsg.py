@@ -135,7 +135,7 @@ def mkmsg(desc, output_prefix):
 	header = open(output_prefix + '.h', 'w')
 	header.write('#ifndef RL_PROTOCOL_AUTOGEN_H\n')
 	header.write('#define RL_PROTOCOL_AUTOGEN_H\n')
-	header.write('#include "../src/util.h"\n\n')
+	header.write('#include "util.h"\n\n')
 
 	source = open(output_prefix + '.c', 'w')
 	source.write('#include "%s.h"\n' % (os.path.basename(output_prefix)))
