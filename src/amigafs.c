@@ -916,6 +916,7 @@ static void action_locate_object(rl_amigafs_t *fs, struct DosPacket* packet)
 	RL_MSG_INIT(msg, RL_MSG_OPEN_HANDLE_REQUEST);
 	msg.open_handle_request.hdr_sequence_num	= pending_op->request_seqno;
 	msg.open_handle_request.path				= &full_path[0];
+	msg.open_handle_request.mode				= RL_OPENFLAG_READ;
 	if (0 != peer_transmit_message(fs->peer, &msg))
 	{
 		error_code = ERROR_NOT_A_DOS_DISK;

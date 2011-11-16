@@ -303,6 +303,16 @@ int main(int argc, char** argv)
 #endif
 	}
 
+	/* make sure root path stored doesn't contain a path separator */
+	{
+		size_t dirlen = strlen(ctrl.root_handle.native_path);
+		
+		if (dirlen > 0 && ctrl.root_handle.native_path[dirlen-1] == NATIVE_PATH_TERMINATOR)
+		{
+			ctrl.root_handle.native_path[dirlen-1] = '\0';
+		}
+	}
+
 	/* Set up virtual input/output files. */
 	ctrl.vinput_handle.type = RL_NODE_TYPE_FILE;
 	ctrl.voutput_handle.type = RL_NODE_TYPE_FILE;

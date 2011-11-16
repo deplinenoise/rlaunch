@@ -73,12 +73,6 @@ static rl_filehandle_t *get_handle_from_id(rl_controller_t *self, peer_t *peer, 
 	}
 }
 
-#ifdef RL_WIN32
-#define NATIVE_PATH_TERMINATOR '\\'
-#else
-#define NATIVE_PATH_TERMINATOR '/'
-#endif
-
 static int fix_path(char *dest, size_t dest_size, const char *input, const char *root_path)
 {
 	/* FIXME: Make something proper of this. */
@@ -98,7 +92,7 @@ static int fix_path(char *dest, size_t dest_size, const char *input, const char 
 	rl_format_msg(dest, dest_size, "%s\\%s", root_path, backslash_path);
 	return 0;
 #else
-	rl_string_copy(dest_size, dest, input);
+	rl_format_msg(dest, dest_size, "%s/%s", root_path, input);
 	return 0;
 #endif
 }
@@ -220,41 +214,70 @@ static rl_filehandle_t *make_handle(rl_controller_t *self, const char *path, int
 	}
 #elif defined(RL_POSIX)
 	{
-#if defined(RL_APPLE)
 		int flags = 0;
-#else
-		int flags = O_LARGEFILE;
-#endif
-		mode_t mode = 0;
+		struct stat st;
 
-		if (mode & RL_OPENFLAG_WRITE)
+#if !defined(RL_APPLE)
+		flags |= O_LARGEFILE;
+#endif
+
+		/* figure out if the requested path is a file or directory */
+		if (0 == (mode & RL_OPENFLAG_WRITE))
 		{
-			if (mode & RL_OPENFLAG_READ)
-				flags = O_RDWR;
+			if (0 != stat(native_path, &st))
+			{
+				*error_out = RL_NETERR_NOT_FOUND;
+				slot->handle = 0;
+				return NULL;
+			}
+
+			if (S_ISDIR(st.st_mode))
+				slot->type = RL_NODE_TYPE_DIRECTORY;
 			else
-				flags = O_WRONLY;
+				slot->type = RL_NODE_TYPE_FILE;
 		}
 		else
 		{
-			if (mode & RL_OPENFLAG_READ)
-				flags = O_RDONLY;
+			slot->type = RL_NODE_TYPE_FILE;
+		}
+
+		if (RL_NODE_TYPE_FILE == slot->type)
+		{
+			if (mode & RL_OPENFLAG_WRITE)
+			{
+				if (mode & RL_OPENFLAG_READ)
+					flags = O_RDWR;
+				else
+					flags = O_WRONLY;
+			}
 			else
 			{
-				*error_out = RL_NETERR_INVALID_VALUE;
+				if (mode & RL_OPENFLAG_READ)
+					flags = O_RDONLY;
+				else
+				{
+					*error_out = RL_NETERR_INVALID_VALUE;
+					return NULL;
+				}
+			}
+
+			if (mode & RL_OPENFLAG_CREATE)
+				flags |= O_CREAT;
+
+			slot->handle = open(native_path, flags, 0666);
+
+			if (-1 == slot->handle)
+			{
+				*error_out = translate_posix_errno();
+				slot->handle = 0;
 				return NULL;
 			}
 		}
-
-		if (mode & RL_OPENFLAG_CREATE)
-			flags |= O_CREAT;
-
-		slot->handle = open(native_path, flags, 0666);
-
-		if (-1 == slot->handle)
+		else
 		{
-			*error_out = translate_posix_errno();
-			slot->handle = 0;
-			return NULL;
+			/* mark the handle as a directory using -1 */
+			slot->handle = -1;
+			slot->size = 0;
 		}
 	}
 #else
@@ -329,7 +352,8 @@ static int close_handle_request(peer_t *peer, const rl_msg_t *msg)
 		CloseHandle(handle->handle);
 	handle->handle = NULL;
 #elif defined(RL_POSIX)
-	close(handle->handle);
+	if (-1 == handle->handle)
+		close(handle->handle);
 	handle->handle = 0;
 #else
 #error "Implement me."
