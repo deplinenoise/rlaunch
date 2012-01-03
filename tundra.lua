@@ -41,5 +41,4 @@ Build {
 	},
 	Units = "units.lua",
 	ScriptDirs = { "." },
-	SyntaxExtensions = { "tundra.syntax.glob", "src.msgcompiler" },
 }

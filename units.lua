@@ -1,3 +1,5 @@
+require "tundra.syntax.glob"
+require "src.msgcompiler"
 
 StaticLibrary {
 	Name = "common",
