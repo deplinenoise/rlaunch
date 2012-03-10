@@ -214,6 +214,7 @@ static rl_filehandle_t *make_handle(rl_controller_t *self, const char *path, int
 	}
 #elif defined(RL_POSIX)
 	{
+		struct stat st_buf;
 		int flags = 0;
 		struct stat st;
 
@@ -266,12 +267,20 @@ static rl_filehandle_t *make_handle(rl_controller_t *self, const char *path, int
 
 			slot->handle = open(native_path, flags, 0666);
 
-			if (-1 == slot->handle)
+			if (-1 == slot->handle || 0 != fstat(slot->handle, &st_buf))
 			{
 				*error_out = translate_posix_errno();
+
+				if (-1 != slot->handle)
+				{
+					close(slot->handle);
+				}
+
 				slot->handle = 0;
 				return NULL;
 			}
+
+			slot->size = st_buf.st_size;
 		}
 		else
 		{
