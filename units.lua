@@ -29,6 +29,9 @@ Program {
 	Depends = {
 		"common"
 	},
+  Libs = {
+    { "ws2_32.lib"; Config = "win64-*-*" },
+  },
 }
 
 Program {
@@ -44,6 +47,9 @@ Program {
 	Depends = {
 		"common"
 	},
+  Libs = {
+    { "ws2_32.lib"; Config = "win64-*-*" },
+  },
 }
 
 Default "rl-controller"

@@ -13,7 +13,7 @@
 #define RL_POSIX 1
 #define RL_LINUX 1
 #define NATIVE_PATH_TERMINATOR '/'
-#elif defined(WIN32)
+#elif defined(WIN32) || defined(_WIN32)
 #define RL_WIN32 1
 #define NATIVE_PATH_TERMINATOR '\\'
 #endif

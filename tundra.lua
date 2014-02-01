@@ -20,6 +20,16 @@ local osx = {
 	},
 }
 
+local win = {
+	Inherit = common,
+	Env = {
+		CCOPTS = {
+			"/W4", "/wd4127", "/wd4100",
+			{ "/O2"; Config = "*-*-release" },
+		},
+	},
+}
+
 local amiga = {
 	Inherit = common,
 	Env = {
@@ -45,7 +55,7 @@ Build {
 	Configs = {
 		Config { Name = "linux-gcc", DefaultOnHost = "linux", Tools = { "gcc" }, },
 		Config { Name = "macosx-gcc", DefaultOnHost = "macosx", Tools = { "gcc-osx" }, Inherit = osx },
-		Config { Name = "win64-msvc", DefaultOnHost = "windows", Tools = { "msvc-vs2008"; TargetPlatform = "x64" }, },
+		Config { Name = "win64-msvc", DefaultOnHost = "windows", Tools = { { "msvc-vs2012"; TargetPlatform = "x64" }, }, Inherit = win, },
 		Config { Name = "amiga-vbcc", Inherit = amiga, Tools = { "vbcc" }, SupportedHosts = { "macosx" } },
 	},
 	Units = "units.lua",

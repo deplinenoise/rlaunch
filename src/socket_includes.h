@@ -20,8 +20,8 @@
 #endif
 
 #if defined(RL_WIN32)
-#include <windows.h>
 #include <winsock2.h>
+#include <windows.h>
 #include <ws2tcpip.h>
 #endif
 

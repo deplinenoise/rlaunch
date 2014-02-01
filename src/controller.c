@@ -14,6 +14,7 @@
 #include <sys/types.h>
 #include <dirent.h>
 #include <unistd.h>
+#include <fcntl.h>
 #endif
 
 static int on_connected(peer_t *peer)
@@ -95,10 +96,20 @@ static peer_t *connect_to_target(const char* machine, const char* port)
 	struct addrinfo hint;
 	struct addrinfo *address_list = NULL, *addrp;
 
+#if defined(RL_POSIX)
+  const int blocking_error = EINPROGRESS;
+  int fd_opts = 0;
+#elif defined(RL_WIN32)
+  const int blocking_error = WSAEWOULDBLOCK;
+  u_long ioctl_arg = 0;
+#endif
+
 	rl_memset(&hint, 0, sizeof(hint));
 	hint.ai_family = AF_INET;
 	hint.ai_socktype = SOCK_STREAM;
 	hint.ai_protocol = IPPROTO_TCP;
+
+  RL_LOG_DEBUG(("resolving %s\n", machine));
 
 	if (0 != getaddrinfo(machine, port, &hint, &address_list))
 	{
@@ -113,24 +124,94 @@ static peer_t *connect_to_target(const char* machine, const char* port)
 		goto cleanup;
 	}
 
+  /* Switch socket to non-blocking mode */
+#if defined(RL_POSIX)
+  fd_opts = fcntl(sock, F_GETFL, 0);
+
+  if (fcntl(sock, F_SETFL, fd_opts | O_NONBLOCK) != 0)
+  {
+    RL_LOG_CONSOLE(("fcntl nonblock failed\n"));
+    goto cleanup;
+  }
+#elif defined(RL_WIN32)
+  ioctl_arg = 1;
+  if (0 != ioctlsocket(sock, FIONBIO, &ioctl_arg))
+  {
+    RL_LOG_CONSOLE(("ioctlsocket nonblock failed\n"));
+    goto cleanup;
+  }
+#else
+#error unsupported platform
+#endif
+
 	for (addrp = address_list; addrp; addrp = addrp->ai_next)
 	{
-		if (0 == connect(sock, addrp->ai_addr, (int) addrp->ai_addrlen))
-		{
-			if (NULL == (this_peer = RL_ALLOC_TYPED_ZERO(peer_t)))
-			{
-				RL_LOG_CONSOLE(("out of memory allocating peer"));
-				goto cleanup;
-			}
+    int connect_rc = connect(sock, addrp->ai_addr, (int) addrp->ai_addrlen);
+    int err = RL_LAST_SOCKET_ERROR;
 
-			if (0 != peer_init(this_peer, sock, addrp->ai_addr, &controller_callbacks, PEER_INIT_CONTROLLER, NULL))
-			{
-				RL_LOG_CONSOLE(("Failed to init peer"));
-				RL_FREE_TYPED(peer_t, this_peer);
-				this_peer = NULL;
+    RL_LOG_DEBUG(("non-blocking connect => %d w/ errno: %d", connect_rc, (int) err));
+
+    if (-1 == connect_rc && err == blocking_error)
+    {
+      struct timeval timeout;
+      fd_set rset, wset;
+
+      FD_ZERO(&rset);
+      FD_ZERO(&wset);
+      FD_SET(sock, &rset);
+      FD_SET(sock, &wset);
+
+      /* Wait for up to 10 seconds for a connection. */
+      timeout.tv_sec = 10;
+      timeout.tv_usec = 0;
+
+      RL_LOG_DEBUG(("waiting for connection to complete"));
+
+      select(sock + 1, &rset, &wset, NULL, &timeout);
+
+      if (!FD_ISSET(sock, &rset) && !FD_ISSET(sock, &wset))
+      {
+        RL_LOG_CONSOLE(("connection timeout - is %s running rlaunch?", machine));
 				goto cleanup;
-			}
-		}
+      }
+
+      /* Switch back to blocking mode */
+#if defined(RL_POSIX)
+      if (0 != fcntl(sock, F_SETFL, fd_opts))
+      {
+        RL_LOG_CONSOLE(("couldn't switch socket back to blocking"));
+				goto cleanup;
+      }
+#elif defined(RL_WIN32)
+      ioctl_arg = 0;
+      if (0 != ioctlsocket(sock, FIONBIO, &ioctl_arg))
+      {
+        RL_LOG_CONSOLE(("couldn't switch socket back to blocking"));
+        goto cleanup;
+      }
+#else
+#error unknown platform
+#endif
+    }
+    else if (0 != connect_rc)
+    {
+      RL_LOG_CONSOLE(("some other connect() error: %d - errno: %d", connect_rc, (int) RL_LAST_SOCKET_ERROR));
+      goto cleanup;
+    }
+
+    if (NULL == (this_peer = RL_ALLOC_TYPED_ZERO(peer_t)))
+    {
+      RL_LOG_CONSOLE(("out of memory allocating peer"));
+      goto cleanup;
+    }
+
+    if (0 != peer_init(this_peer, sock, addrp->ai_addr, &controller_callbacks, PEER_INIT_CONTROLLER, NULL))
+    {
+      RL_LOG_CONSOLE(("Failed to init peer"));
+      RL_FREE_TYPED(peer_t, this_peer);
+      this_peer = NULL;
+      goto cleanup;
+    }
 	}
 
 	if (!this_peer)

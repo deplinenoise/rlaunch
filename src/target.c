@@ -264,6 +264,9 @@ static int on_launch_executable_request(peer_t *peer, const rl_msg_t *msg)
 
 #if defined(RL_AMIGA)
 	spawn_result = async_spawn(peer, msg->launch_executable_request.path, msg->launch_executable_request.arguments);
+#else 
+	RL_LOG_INFO(("faking executable launch"));
+  spawn_result = 0;
 #endif
 
 	if (0 == spawn_result)
@@ -695,6 +698,9 @@ int main(int argc, char** argv)
 {
 	int cleanup_alloc = 0;
 	int cleanup_socket = 0;
+
+  /* This is only for debugging - so always rock full debugging bits. */
+  rl_log_bits = RL_ALL_LOG_BITS;
 
 #if defined(RL_WIN32)
 	SetConsoleCtrlHandler(ctrl_c_handler, TRUE);
