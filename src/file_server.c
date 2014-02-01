@@ -598,6 +598,8 @@ static int write_file_request(peer_t *peer, const rl_msg_t *msg)
 	if (handle == &self->voutput_handle)
 	{
 		fwrite(request->data.base, 1, request->data.length, stdout);
+    /* Flush data right away. */
+    fflush(stdout);
 	}
 	else
 	{
