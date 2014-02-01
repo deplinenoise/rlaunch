@@ -2,6 +2,9 @@
 local CFiles = { ".c", ".h" }
 
 local common = {
+  Env = {
+    CPPPATH = { "$(OBJECTDIR)" },
+  },
 	Defines = {
 		{ "NDEBUG"; Config = "*-*-release" },
 	},
@@ -26,6 +29,12 @@ local amiga = {
 			"-dontwarn=163", "-dontwarn=307", "-dontwarn=65",
 			"-dontwarn=166", "-dontwarn=167", "-dontwarn=81"
 		},
+	},
+	ReplaceEnv = {
+		["CC"] = "$(VBCC_ROOT)$(SEP)bin$(SEP)Darwin$(SEP)vc$(HOSTPROGSUFFIX)",
+		["LIB"] = "$(VBCC_ROOT)$(SEP)bin$(SEP)Darwin$(SEP)vlink$(HOSTPROGSUFFIX)",
+		["LD"] = "$(VBCC_ROOT)$(SEP)bin$(SEP)Darwin$(SEP)vc$(HOSTPROGSUFFIX)",
+		["ASM"] = "$(VBCC_ROOT)$(SEP)bin$(SEP)Darwin$(SEP)vasmm68k_mot$(HOSTPROGSUFFIX)",
 	},
 }
 
