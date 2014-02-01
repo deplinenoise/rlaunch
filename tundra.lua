@@ -46,7 +46,7 @@ Build {
 		Config { Name = "linux-gcc", DefaultOnHost = "linux", Tools = { "gcc" }, },
 		Config { Name = "macosx-gcc", DefaultOnHost = "macosx", Tools = { "gcc-osx" }, Inherit = osx },
 		Config { Name = "win64-msvc", DefaultOnHost = "windows", Tools = { "msvc-vs2008"; TargetPlatform = "x64" }, },
-		Config { Name = "amiga-vbcc", Inherit = amiga, Tools = { "vbcc" }, },
+		Config { Name = "amiga-vbcc", Inherit = amiga, Tools = { "vbcc" }, SupportedHosts = { "macosx" } },
 	},
 	Units = "units.lua",
 	ScriptDirs = { "." },

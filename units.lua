@@ -32,14 +32,14 @@ Program {
 }
 
 Program {
-	Config = "amiga-*-*",
 	Name = "rl-target",
-	Libs = { "amiga" },
+	Libs = { "amiga"; Config = "amiga-*-*" },
 	Includes = {
 		"$(OBJECTDIR)/_generated", "src",
 	},
 	Sources = {
-		"src/amigafs.c", "src/target.c"
+    { "src/amigafs.c"; Config = "amiga-*-*" },
+    "src/target.c"
 	},
 	Depends = {
 		"common"
