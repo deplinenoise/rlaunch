@@ -33,7 +33,7 @@ local win = {
 local amiga = {
 	Inherit = common,
 	Env = {
-		CPPDEFS = { "NO_C_LIB" },
+		CPPDEFS = { "__AMIGA__", "NO_C_LIB" },
 		CCOPTS = {
 			"-warn=-1",
 			"-dontwarn=163", "-dontwarn=307", "-dontwarn=65",
@@ -41,10 +41,10 @@ local amiga = {
 		},
 	},
 	ReplaceEnv = {
-		["CC"] = "$(VBCC_ROOT)$(SEP)bin$(SEP)Darwin$(SEP)vc$(HOSTPROGSUFFIX)",
-		["LIB"] = "$(VBCC_ROOT)$(SEP)bin$(SEP)Darwin$(SEP)vlink$(HOSTPROGSUFFIX)",
-		["LD"] = "$(VBCC_ROOT)$(SEP)bin$(SEP)Darwin$(SEP)vc$(HOSTPROGSUFFIX)",
-		["ASM"] = "$(VBCC_ROOT)$(SEP)bin$(SEP)Darwin$(SEP)vasmm68k_mot$(HOSTPROGSUFFIX)",
+		["CC"] = "$(VBCC_ROOT)$(SEP)bin$(SEP)vc$(HOSTPROGSUFFIX)",
+		["LIB"] = "$(VBCC_ROOT)$(SEP)bin$(SEP)vlink$(HOSTPROGSUFFIX)",
+		["LD"] = "$(VBCC_ROOT)$(SEP)bin$(SEP)vc$(HOSTPROGSUFFIX)",
+		["ASM"] = "$(VBCC_ROOT)$(SEP)bin$(SEP)vasmm68k_mot$(HOSTPROGSUFFIX)",
 	},
 }
 
@@ -55,8 +55,8 @@ Build {
 	Configs = {
 		Config { Name = "linux-gcc", DefaultOnHost = "linux", Tools = { "gcc" }, },
 		Config { Name = "macosx-gcc", DefaultOnHost = "macosx", Tools = { "gcc-osx" }, Inherit = osx },
-		Config { Name = "win64-msvc", DefaultOnHost = "windows", Tools = { { "msvc-vs2012"; TargetPlatform = "x64" }, }, Inherit = win, },
-		Config { Name = "amiga-vbcc", Inherit = amiga, Tools = { "vbcc" }, SupportedHosts = { "macosx" } },
+		Config { Name = "win64-msvc", DefaultOnHost = "windows", Tools = { { "msvc-vs2015"; TargetPlatform = "x64" }, }, Inherit = win, },
+		Config { Name = "amiga-vbcc", Inherit = amiga, Tools = { "vbcc" }, SupportedHosts = { "macosx", "windows" } },
 	},
 	Units = "units.lua",
 	ScriptDirs = { "." },
