@@ -137,7 +137,7 @@ static __saveds ULONG cmd_launcher(void)
 		rl_format_msg(cmdline_with_args, sizeof(cmdline_with_args), "%s",
 					  launch_msg->command_path);
 
-	if (0 != SystemTagList(cmdline_with_args, &system_tags[0]))
+	if (-1 == SystemTagList(cmdline_with_args, &system_tags[0]))
 	{
 		/* If SystemTagList() fails we have to clean up the current directory
 		 * lock manually */

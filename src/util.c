@@ -269,6 +269,7 @@ void rl_toggle_log_bits(const char *argument)
 			case 'w': bit = RL_WARNING; break;
 			case 'c': bit = RL_CONSOLE; break;
 			case 'p': bit = RL_PACKET; break;
+			case 's': bit = RL_SERIAL_OUT; break;
 			default:
 				RL_LOG_CONSOLE(("Invalid log bit: %c", c));
 				break;
@@ -282,11 +283,23 @@ static char log_buffer[256];
 static char *log_cursor = &log_buffer[0];
 static char * const log_max = &log_buffer[sizeof(log_buffer)-1];
 
+
+void __RawPutChar(__reg("a6") void *, __reg("d0") char ch)="\tjsr\t-516(a6)";
+#define RawPutChar(ch) __RawPutChar(SysBase, (ch))
+
 static void log_flush()
 {
 	*log_cursor = 0;
 #ifdef RL_AMIGA
-	if (DOSBase)
+	if (rl_log_bits & RL_SERIAL_OUT)
+	{
+		log_cursor = &log_buffer[0];
+		while(*log_cursor) {
+			RawPutChar(*log_cursor);
+			log_cursor++;
+		}
+	}
+	else if (DOSBase)
 	{
 		FPuts(Output(), log_buffer);
 		Flush(Output());

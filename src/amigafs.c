@@ -684,10 +684,6 @@ static void action_examine_object(rl_amigafs_t *fs, struct DosPacket *packet)
 		fib->fib_DiskKey = 0L;
 		fib->fib_DirEntryType = RL_HANDLE_FILE == handle->type ? -1 : 1;
 		construct_bstr(fib->fib_FileName, sizeof(fib->fib_FileName), handle->path);
-		/* Set protection bits for regular files. These set bits in the
-		 * protection mask indicate forbidden actions, not caps. Really weird.
-		 * */
-		fib->fib_Protection = FIBF_WRITE | FIBF_DELETE /* simulate R/O FS */;
 		fib->fib_Size = handle->size_lo;
 		fib->fib_NumBlocks = handle->size_lo;
 		fib->fib_Comment[0] = '\0';
