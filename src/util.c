@@ -284,8 +284,10 @@ static char *log_cursor = &log_buffer[0];
 static char * const log_max = &log_buffer[sizeof(log_buffer)-1];
 
 
+#ifdef RL_AMIGA
 void __RawPutChar(__reg("a6") void *, __reg("d0") char ch)="\tjsr\t-516(a6)";
 #define RawPutChar(ch) __RawPutChar(SysBase, (ch))
+#endif
 
 static void log_flush()
 {
