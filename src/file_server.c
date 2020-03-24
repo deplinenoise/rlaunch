@@ -41,11 +41,6 @@ rl_proto_neterror_t translate_posix_errno(void)
 	}
 }
 
-static INLINE int reply_with_posix_errno(peer_t *peer, const rl_msg_t *msg)
-{
-	return reply_with_error(peer, msg, translate_posix_errno());
-}
-
 #endif
 
 
