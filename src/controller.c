@@ -68,6 +68,7 @@ static int on_message_received(peer_t *peer, const rl_msg_t *msg)
 			else if (RL_MSG_EXECUTABLE_DONE_REQUEST == rl_msg_kind_of(msg))
 			{
 				RL_LOG_INFO(("executable completed with rc=%d", msg->executable_done_request.result_code));
+				self->result = msg->executable_done_request.result_code;
 				return 1;
 			}
 			else
@@ -423,5 +424,5 @@ cleanup:
 	}
 	if (sockets_initialized)
 		rl_fini_socket();
-	return 0;
+	return ctrl.result;
 }
