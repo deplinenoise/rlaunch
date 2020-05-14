@@ -12,7 +12,11 @@
 #elif defined(RL_POSIX)
 #include <sys/types.h>
 #include <sys/stat.h>
+#if defined(RL_APPLE)
 #include <sys/syslimits.h>
+#else
+#include <limits.h>
+#endif
 #include <errno.h>
 #include <fcntl.h>
 #include <unistd.h>
@@ -118,7 +122,7 @@ static rl_filehandle_t *make_handle(rl_controller_t *self, const char *path, int
 		if (!slot->handle)
 			break;
 	}
-	
+
 	if (slot_end == slot)
 	{
 		*error_out = RL_NETERR_TOO_MANY_FILES_OPEN;
@@ -347,7 +351,7 @@ static int close_handle_request(peer_t *peer, const rl_msg_t *msg)
 	if (RL_FILEHANDLE_VIRTUAL_INPUT == msg->close_handle_request.handle ||
 		RL_FILEHANDLE_VIRTUAL_OUTPUT == msg->close_handle_request.handle)
 		return 0;
-   
+
 	if (NULL == (handle = get_handle_from_id(self, peer, msg->close_handle_request.handle)))
 		return reply_with_error(peer, msg, RL_NETERR_INVALID_VALUE);
 
@@ -378,7 +382,7 @@ static int find_next_file_request(peer_t *peer, const rl_msg_t *msg)
 #elif(defined RL_POSIX)
 	struct dirent *dent;
 #endif
-   
+
 	if (NULL == (handle = get_handle_from_id(self, peer, msg->find_next_file_request.handle)))
 		return reply_with_error(peer, msg, RL_NETERR_INVALID_VALUE);
 
@@ -512,7 +516,7 @@ static int read_file_request(peer_t *peer, const rl_msg_t *msg)
 
 	if (NULL == (handle = get_handle_from_id(self, peer, request->handle)))
 		return reply_with_error(peer, msg, RL_NETERR_INVALID_VALUE);
-	
+
 #ifdef RL_WIN32
 	if (INVALID_HANDLE_VALUE == handle->handle)
 		return reply_with_error(peer, msg, RL_NETERR_NOT_A_FILE);
@@ -533,7 +537,7 @@ static int read_file_request(peer_t *peer, const rl_msg_t *msg)
 
 		if (size_to_read > request->length)
 			size_to_read = request->length;
-		
+
 		if (0 == ReadFile(handle->handle, &read_buffer[0], size_to_read, &bytes_read, NULL))
 		{
 			RL_LOG_DEBUG(("ReadFile failed w/ Win32 error %d", (int) GetLastError()));

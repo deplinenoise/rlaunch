@@ -18,8 +18,11 @@ StaticLibrary {
 
 
 Program {
-	Config = { "macosx-*-*", "win64-*-*" },
+	Config = { "macosx-*-*", "win64-*-*", "linux-*-*" },
 	Name = "rl-controller",
+	Env = {
+		CPPDEFS = { "_GNU_SOURCE"; Config = "linux-*-*"},
+	},
 	Includes = {
 		"$(OBJECTDIR)/_generated", "src",
 	},
