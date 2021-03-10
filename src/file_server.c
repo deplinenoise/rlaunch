@@ -455,6 +455,9 @@ static int find_next_file_request(peer_t *peer, const rl_msg_t *msg)
 
 	answer.find_next_file_answer.end_of_sequence = 0;
 
+	// Set errno to zero before calling readdir; errno is not changed at end-of-directory
+	errno = 0;
+
 	if (NULL == (dent = readdir(handle->dir_handle)))
 	{
 		if (0 == errno)

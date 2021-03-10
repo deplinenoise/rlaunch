@@ -137,19 +137,16 @@ static __saveds ULONG cmd_launcher(void)
 		rl_format_msg(cmdline_with_args, sizeof(cmdline_with_args), "%s",
 					  launch_msg->command_path);
 
-	if (-1 == SystemTagList(cmdline_with_args, &system_tags[0]))
+	launch_msg->result_code = SystemTagList(cmdline_with_args, &system_tags[0]);
+	if (-1 == launch_msg->result_code)
 	{
 		/* If SystemTagList() fails we have to clean up the current directory
 		 * lock manually */
 		UnLock(MKBADDR(launch_msg->root_lock));
 		launch_msg->result_code = 1;
 	}
-	else
-	{
-		launch_msg->result_code = 0;
-	}
 
-	RL_LOG_DEBUG(("[thread] command %s completed with code ",
+	RL_LOG_DEBUG(("[thread] command %s completed with code %d",
 				  launch_msg->command_path, launch_msg->result_code));
 
 	/* The handles have not been closed, so clean them up now. */

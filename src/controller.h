@@ -45,6 +45,7 @@ typedef struct rl_controller_tag
 	const char* executable;
 	const char *arguments[16];
 	int arg_count;
+	int result;
 } rl_controller_t;
 
 struct peer_tag;
