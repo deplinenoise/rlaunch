@@ -118,7 +118,7 @@ def mkmsg(desc, output_prefix):
 			current.add_field(key, types[type_name], guard)
 			continue
 		else:
-			raise Exception, 'illegal line: ' + line
+			raise Exception('illegal line: ' + line)
 
 	# distribute common fields
 	# reverse these lists; inserting them restores the order
@@ -142,7 +142,7 @@ def mkmsg(desc, output_prefix):
 	source.write(SOURCE_START)
 
 	header.write('typedef enum rl_msg_kind_tag {\n')
-	for i in xrange(0, len(messages)):
+	for i in range(0, len(messages)):
 		msg = messages[i]
 		header.write('\tRL_MSG_%s_%s = 0x%x,\n' % (msg.name.upper(), msg.type.upper(), i))
 	header.write('\tRL_MSG_MAX = %d,\n' % (len(messages)-1))
@@ -258,7 +258,7 @@ def mkmsg(desc, output_prefix):
 	source.write('typedef int (*rl_encode_fn_t)(const rl_msg_t *msg, void *buffer, int size);\n')
 
 	source.write('static const rl_decode_fn_t decoders[%d] = {\n' % (len(messages)))
-	for i in xrange(0, len(messages)):
+	for i in range(0, len(messages)):
 		msg = messages[i]
 		source.write('\tdecode_%s_%s' % (msg.name, msg.type))
 		if i + 1 != len(messages):
@@ -268,7 +268,7 @@ def mkmsg(desc, output_prefix):
 
 	# emit encoder table
 	source.write('static const rl_encode_fn_t encoders[%d] = {\n' % (len(messages)))
-	for i in xrange(0, len(messages)):
+	for i in range(0, len(messages)):
 		msg = messages[i]
 		source.write('\tencode_%s_%s' % (msg.name, msg.type))
 		if i + 1 != len(messages):
@@ -278,7 +278,7 @@ def mkmsg(desc, output_prefix):
 
 	# emit describer table
 	source.write('static const rl_describe_fn_t describers[%d] = {\n' % (len(messages)))
-	for i in xrange(0, len(messages)):
+	for i in range(0, len(messages)):
 		msg = messages[i]
 		source.write('\tdescribe_%s_%s' % (msg.name, msg.type))
 		if i + 1 != len(messages):

@@ -2,7 +2,7 @@ module(..., package.seeall)
 
 DefRule {
   Name = "CompileNetMessages",
-  Command = "python src/mkmsg.py $(MSGSTEM) < $(<)",
+  Command = "python3 src/mkmsg.py $(MSGSTEM) < $(<)",
   ImplicitInputs = { "src/mkmsg.py" },
   Blueprint = {
     Input = { Type = "string", Required = true },

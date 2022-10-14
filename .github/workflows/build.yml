@@ -1,0 +1,54 @@
+name: build
+
+on:
+  push:
+    branches:
+      - '*'
+    tags-ignore:
+      - '*'
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+
+  Linux:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v3
+    - name: apt install
+      run: sudo apt-get install wget p7zip-full
+    - name: build vbcc
+      run: ./build_vbcc.sh
+    - name: build tundra2
+      run: |
+        git clone --recurse-submodules https://github.com/deplinenoise/tundra.git t2-build 
+        cd t2-build
+        make -j 4
+        PREFIX=$PWD/../tundra make install
+    - name: build release
+      run: |
+        export VBCC=$PWD/vbcc
+        export PATH=$PATH:$PWD/tundra/bin
+        tundra2 release
+        tundra2 -j 1 amiga-vbcc-release
+
+  macOS:
+    runs-on: macos-latest
+    steps:
+    - uses: actions/checkout@v3
+    - name: brew install
+      run: brew install wget p7zip
+    - name: build vbcc
+      run: ./build_vbcc.sh
+    - name: build tundra2
+      run: |
+        git clone --recurse-submodules https://github.com/deplinenoise/tundra.git t2-build 
+        cd t2-build
+        make -j 4
+        PREFIX=$PWD/../tundra make install
+    - name: build release
+      run: |
+        export VBCC=$PWD/vbcc
+        export PATH=$PATH:$PWD/tundra/bin
+        tundra2 release
+        tundra2 -j 1 amiga-vbcc-release
